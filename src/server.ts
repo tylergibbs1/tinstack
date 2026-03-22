@@ -357,6 +357,54 @@ import { S3TablesHandler } from "./services/s3tables/s3tables-handler";
 import { S3VectorsService } from "./services/s3vectors/s3vectors-service";
 import { S3VectorsHandler } from "./services/s3vectors/s3vectors-handler";
 
+// Batch 9 — Final 23 niche services
+import { ApiGatewayManagementService } from "./services/apigateway-management/apigateway-management-service";
+import { ApiGatewayManagementHandler } from "./services/apigateway-management/apigateway-management-handler";
+import { IoTDataService } from "./services/iotdata/iotdata-service";
+import { IoTDataHandler } from "./services/iotdata/iotdata-handler";
+import { LexV2Service } from "./services/lexv2/lexv2-service";
+import { LexV2Handler } from "./services/lexv2/lexv2-handler";
+import { SageMakerRuntimeService } from "./services/sagemaker-runtime/sagemaker-runtime-service";
+import { SageMakerRuntimeHandler } from "./services/sagemaker-runtime/sagemaker-runtime-handler";
+import { SageMakerMetricsService } from "./services/sagemaker-metrics/sagemaker-metrics-service";
+import { SageMakerMetricsHandler } from "./services/sagemaker-metrics/sagemaker-metrics-handler";
+import { PersonalizeService } from "./services/personalize/personalize-service";
+import { PersonalizeHandler } from "./services/personalize/personalize-handler";
+import { SwfService } from "./services/swf/swf-service";
+import { SwfHandler } from "./services/swf/swf-handler";
+import { ServiceCatalogService } from "./services/servicecatalog/servicecatalog-service";
+import { ServiceCatalogHandler } from "./services/servicecatalog/servicecatalog-handler";
+import { ServiceCatalogAppRegistryService } from "./services/servicecatalog-appregistry/servicecatalog-appregistry-service";
+import { ServiceCatalogAppRegistryHandler } from "./services/servicecatalog-appregistry/servicecatalog-appregistry-handler";
+import { ConnectCampaignsService } from "./services/connect-campaigns/connect-campaigns-service";
+import { ConnectCampaignsHandler } from "./services/connect-campaigns/connect-campaigns-handler";
+import { GreengrassService } from "./services/greengrass/greengrass-service";
+import { GreengrassHandler } from "./services/greengrass/greengrass-handler";
+import { NetworkManagerService } from "./services/networkmanager/networkmanager-service";
+import { NetworkManagerHandler } from "./services/networkmanager/networkmanager-handler";
+import { OpenSearchServerlessService } from "./services/opensearch-serverless/opensearch-serverless-service";
+import { OpenSearchServerlessHandler } from "./services/opensearch-serverless/opensearch-serverless-handler";
+import { RdsDataService } from "./services/rdsdata/rdsdata-service";
+import { RdsDataHandler } from "./services/rdsdata/rdsdata-handler";
+import { RedshiftDataService } from "./services/redshift-data/redshift-data-service";
+import { RedshiftDataHandler } from "./services/redshift-data/redshift-data-handler";
+import { TimestreamInfluxDBService } from "./services/timestream-influxdb/timestream-influxdb-service";
+import { TimestreamInfluxDBHandler } from "./services/timestream-influxdb/timestream-influxdb-handler";
+import { EC2InstanceConnectService } from "./services/ec2-instance-connect/ec2-instance-connect-service";
+import { EC2InstanceConnectHandler } from "./services/ec2-instance-connect/ec2-instance-connect-handler";
+import { CloudDirectoryService } from "./services/cloud-directory/cloud-directory-service";
+import { CloudDirectoryHandler } from "./services/cloud-directory/cloud-directory-handler";
+import { ElasticsearchService } from "./services/es/es-service";
+import { ElasticsearchHandler } from "./services/es/es-handler";
+import { KinesisVideoArchivedService } from "./services/kinesis-video-archived/kinesis-video-archived-service";
+import { KinesisVideoArchivedHandler } from "./services/kinesis-video-archived/kinesis-video-archived-handler";
+import { MediaPackageV2Service } from "./services/mediapackage-v2/mediapackage-v2-service";
+import { MediaPackageV2Handler } from "./services/mediapackage-v2/mediapackage-v2-handler";
+import { MediaStoreDataService } from "./services/mediastore-data/mediastore-data-service";
+import { MediaStoreDataHandler } from "./services/mediastore-data/mediastore-data-handler";
+import { SimpleDBService } from "./services/sdb/sdb-service";
+import { SimpleDBQueryHandler } from "./services/sdb/sdb-handler";
+
 function isEnabled(config: TinstackConfig, serviceName: string): boolean {
   if (config.enabledServices === "*") return true;
   return config.enabledServices.includes(serviceName);
@@ -1279,6 +1327,139 @@ export function createServer(config: TinstackConfig) {
     enabledNames.push("S3 Vectors");
   }
 
+  // --- Batch 9: Final 23 niche services ---
+
+  let apiGwMgmtHandler: ApiGatewayManagementHandler | undefined;
+  if (isEnabled(config, "apigatewaymanagementapi")) {
+    apiGwMgmtHandler = new ApiGatewayManagementHandler(new ApiGatewayManagementService(config.defaultAccountId));
+    enabledNames.push("API Gateway Management");
+  }
+
+  let iotDataHandler: IoTDataHandler | undefined;
+  if (isEnabled(config, "iot-data")) {
+    iotDataHandler = new IoTDataHandler(new IoTDataService(config.defaultAccountId));
+    enabledNames.push("IoT Data");
+  }
+
+  let lexV2Handler: LexV2Handler | undefined;
+  if (isEnabled(config, "lex-models-v2")) {
+    lexV2Handler = new LexV2Handler(new LexV2Service(config.defaultAccountId));
+    enabledNames.push("Lex V2");
+  }
+
+  let sagemakerRuntimeHandler: SageMakerRuntimeHandler | undefined;
+  if (isEnabled(config, "sagemaker-runtime")) {
+    sagemakerRuntimeHandler = new SageMakerRuntimeHandler(new SageMakerRuntimeService(config.defaultAccountId));
+    enabledNames.push("SageMaker Runtime");
+  }
+
+  let sagemakerMetricsHandler: SageMakerMetricsHandler | undefined;
+  if (isEnabled(config, "sagemaker-metrics")) {
+    sagemakerMetricsHandler = new SageMakerMetricsHandler(new SageMakerMetricsService(config.defaultAccountId));
+    enabledNames.push("SageMaker Metrics");
+  }
+
+  if (isEnabled(config, "personalize")) {
+    jsonRouter.register("personalize", new PersonalizeHandler(new PersonalizeService(config.defaultAccountId)));
+    enabledNames.push("Personalize");
+  }
+
+  if (isEnabled(config, "swf")) {
+    jsonRouter.register("swf", new SwfHandler(new SwfService(config.defaultAccountId)));
+    enabledNames.push("SWF");
+  }
+
+  if (isEnabled(config, "servicecatalog")) {
+    jsonRouter.register("servicecatalog", new ServiceCatalogHandler(new ServiceCatalogService(config.defaultAccountId)));
+    enabledNames.push("Service Catalog");
+  }
+
+  let scAppRegistryHandler: ServiceCatalogAppRegistryHandler | undefined;
+  if (isEnabled(config, "servicecatalog-appregistry")) {
+    scAppRegistryHandler = new ServiceCatalogAppRegistryHandler(new ServiceCatalogAppRegistryService(config.defaultAccountId));
+    enabledNames.push("Service Catalog AppRegistry");
+  }
+
+  let connectCampaignsHandler: ConnectCampaignsHandler | undefined;
+  if (isEnabled(config, "connect-campaigns")) {
+    connectCampaignsHandler = new ConnectCampaignsHandler(new ConnectCampaignsService(config.defaultAccountId));
+    enabledNames.push("Connect Campaigns");
+  }
+
+  let greengrassHandler: GreengrassHandler | undefined;
+  if (isEnabled(config, "greengrass")) {
+    greengrassHandler = new GreengrassHandler(new GreengrassService(config.defaultAccountId));
+    enabledNames.push("Greengrass");
+  }
+
+  let networkManagerHandler: NetworkManagerHandler | undefined;
+  if (isEnabled(config, "networkmanager")) {
+    networkManagerHandler = new NetworkManagerHandler(new NetworkManagerService(config.defaultAccountId));
+    enabledNames.push("Network Manager");
+  }
+
+  if (isEnabled(config, "opensearchserverless")) {
+    jsonRouter.register("opensearch-serverless", new OpenSearchServerlessHandler(new OpenSearchServerlessService(config.defaultAccountId)));
+    enabledNames.push("OpenSearch Serverless");
+  }
+
+  let rdsDataHandler: RdsDataHandler | undefined;
+  if (isEnabled(config, "rds-data")) {
+    rdsDataHandler = new RdsDataHandler(new RdsDataService(config.defaultAccountId));
+    enabledNames.push("RDS Data");
+  }
+
+  if (isEnabled(config, "redshift-data")) {
+    jsonRouter.register("redshift-data", new RedshiftDataHandler(new RedshiftDataService(config.defaultAccountId)));
+    enabledNames.push("Redshift Data");
+  }
+
+  if (isEnabled(config, "timestream-influxdb")) {
+    jsonRouter.register("timestream-influxdb", new TimestreamInfluxDBHandler(new TimestreamInfluxDBService(config.defaultAccountId)));
+    enabledNames.push("Timestream InfluxDB");
+  }
+
+  if (isEnabled(config, "ec2-instance-connect")) {
+    jsonRouter.register("ec2-instance-connect", new EC2InstanceConnectHandler(new EC2InstanceConnectService(config.defaultAccountId)));
+    enabledNames.push("EC2 Instance Connect");
+  }
+
+  let cloudDirectoryHandler: CloudDirectoryHandler | undefined;
+  if (isEnabled(config, "clouddirectory")) {
+    cloudDirectoryHandler = new CloudDirectoryHandler(new CloudDirectoryService(config.defaultAccountId));
+    enabledNames.push("Cloud Directory");
+  }
+
+  let esLegacyHandler: ElasticsearchHandler | undefined;
+  if (isEnabled(config, "es-legacy")) {
+    esLegacyHandler = new ElasticsearchHandler(new ElasticsearchService(config.defaultAccountId));
+    enabledNames.push("Elasticsearch (legacy)");
+  }
+
+  let kinesisVideoArchivedHandler: KinesisVideoArchivedHandler | undefined;
+  if (isEnabled(config, "kinesis-video-archived-media")) {
+    kinesisVideoArchivedHandler = new KinesisVideoArchivedHandler(new KinesisVideoArchivedService(config.defaultAccountId));
+    enabledNames.push("Kinesis Video Archived");
+  }
+
+  let mediaPackageV2Handler: MediaPackageV2Handler | undefined;
+  if (isEnabled(config, "mediapackagev2")) {
+    mediaPackageV2Handler = new MediaPackageV2Handler(new MediaPackageV2Service(config.defaultAccountId));
+    enabledNames.push("MediaPackage V2");
+  }
+
+  let mediaStoreDataHandler: MediaStoreDataHandler | undefined;
+  if (isEnabled(config, "mediastore-data")) {
+    mediaStoreDataHandler = new MediaStoreDataHandler(new MediaStoreDataService(config.defaultAccountId));
+    enabledNames.push("MediaStore Data");
+  }
+
+  if (isEnabled(config, "sdb")) {
+    const sdbHandler = new SimpleDBQueryHandler(new SimpleDBService(config.defaultAccountId));
+    queryRouter.register("sdb", (action, params, ctx) => sdbHandler.handle(action, params, ctx));
+    enabledNames.push("SimpleDB");
+  }
+
   const s3Router = (globalThis as any).__tinstackS3Router as S3Router | undefined;
 
   const server = Bun.serve({
@@ -1501,6 +1682,20 @@ export function createServer(config: TinstackConfig) {
 
         if (inspector2Handler && isServiceRequest(req, "inspector2")) {
           const response = await inspector2Handler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // SageMaker Runtime (REST /endpoints/*/invocations) — before IoT Core to avoid /endpoint match
+        if (sagemakerRuntimeHandler && pathname.match(/^\/endpoints\/[^/]+\/invocations$/)) {
+          const response = await sagemakerRuntimeHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // IoT Data Plane (REST /topics/, /things/*/shadow, /api/things/) — before IoT Core
+        if (iotDataHandler && (pathname.startsWith("/topics/") || pathname.startsWith("/api/things/") || pathname.match(/^\/things\/[^/]+\/shadow/))) {
+          const response = await iotDataHandler.handleRoute(req, ctx);
           logRequest(req, response, startTime);
           return response;
         }
@@ -1739,6 +1934,100 @@ export function createServer(config: TinstackConfig) {
         // S3 Vectors (RPC-style /CreateVectorBucket, /GetVectorBucket, etc.)
         if (s3VectorsHandler && (pathname.startsWith("/vector-buckets") || pathname.startsWith("/CreateVectorBucket") || pathname.startsWith("/GetVectorBucket") || pathname.startsWith("/ListVectorBuckets") || pathname.startsWith("/DeleteVectorBucket") || pathname.startsWith("/CreateIndex") || pathname.startsWith("/GetIndex") || pathname.startsWith("/ListIndexes") || pathname.startsWith("/PutVectors") || pathname.startsWith("/GetVectors") || pathname.startsWith("/QueryVectors") || pathname.startsWith("/DeleteVectors"))) {
           const response = await s3VectorsHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // Cloud Directory (REST /amazonclouddirectory/)
+        if (cloudDirectoryHandler && pathname.startsWith("/amazonclouddirectory/")) {
+          const response = await cloudDirectoryHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // API Gateway Management API (REST /@connections)
+        if (apiGwMgmtHandler && pathname.startsWith("/@connections/")) {
+          const response = await apiGwMgmtHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+// Lex V2 (REST /bots) — disambiguate by auth header
+        if (lexV2Handler && pathname.startsWith("/bots")) {
+          const authSvc = (/Credential=\w+\/\d{8}\/[^/]+\/([^/]+)\//.exec(req.headers.get("authorization") ?? "") ?? [])[1] ?? "";
+          if (authSvc === "models.lex.v2" || authSvc === "lex") {
+            const response = await lexV2Handler.handleRoute(req, ctx);
+            logRequest(req, response, startTime);
+            return response;
+          }
+        }
+
+        // SageMaker Metrics (REST PUT /BatchPutMetrics)
+        if (sagemakerMetricsHandler && pathname === "/BatchPutMetrics") {
+          const response = await sagemakerMetricsHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // Service Catalog AppRegistry (REST /applications)
+        if (scAppRegistryHandler && pathname.startsWith("/applications") && isServiceRequest(req, "servicecatalog")) {
+          const response = await scAppRegistryHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // Connect Campaigns (REST /campaigns)
+        if (connectCampaignsHandler && (pathname.startsWith("/campaigns") || pathname === "/campaigns-list") && isServiceRequest(req, "connect-campaigns")) {
+          const response = await connectCampaignsHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // Greengrass (REST /greengrass)
+        if (greengrassHandler && pathname.startsWith("/greengrass")) {
+          const response = await greengrassHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // Network Manager (REST /global-networks)
+        if (networkManagerHandler && pathname.startsWith("/global-networks")) {
+          const response = await networkManagerHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // RDS Data (REST /Execute, /BatchExecute, etc.)
+        if (rdsDataHandler && (pathname === "/Execute" || pathname === "/execute" || pathname === "/BatchExecute" || pathname === "/batch-execute" || pathname === "/BeginTransaction" || pathname === "/begin-transaction" || pathname === "/CommitTransaction" || pathname === "/commit-transaction" || pathname === "/RollbackTransaction" || pathname === "/rollback-transaction")) {
+          const response = await rdsDataHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // Elasticsearch legacy (REST /2015-01-01/es/domain and /2015-01-01/domain)
+        if (esLegacyHandler && (pathname.startsWith("/2015-01-01/es/domain") || pathname.startsWith("/2015-01-01/domain"))) {
+          const response = await esLegacyHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // Kinesis Video Archived Media (REST POST paths)
+        if (kinesisVideoArchivedHandler && (pathname === "/getMediaForFragmentList" || pathname === "/listFragments" || pathname === "/getHLSStreamingSessionURL" || pathname === "/getDASHStreamingSessionURL")) {
+          const response = await kinesisVideoArchivedHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // MediaPackage V2 (REST /channelGroup)
+        if (mediaPackageV2Handler && pathname.startsWith("/channelGroup")) {
+          const response = await mediaPackageV2Handler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // MediaStore Data (REST for objects — route by auth header)
+        if (mediaStoreDataHandler && (isServiceRequest(req, "data.mediastore") || isServiceRequest(req, "mediastore"))) {
+          const response = await mediaStoreDataHandler.handleRoute(req, ctx);
           logRequest(req, response, startTime);
           return response;
         }

@@ -76,6 +76,13 @@ const TARGET_PREFIX_MAP: Record<string, string> = {
   Route53Domains_v20140515: "route53domains",
   AWSMPMeteringService: "meteringmarketplace",
   CloudApiService: "cloudcontrol",
+  AmazonPersonalize: "personalize",
+  SimpleWorkflowService: "swf",
+  AWS242ServiceCatalogService: "servicecatalog",
+  OpenSearchServerless: "opensearch-serverless",
+  RedshiftData: "redshift-data",
+  AmazonTimestreamInfluxDB: "timestream-influxdb",
+  AWSEC2InstanceConnectService: "ec2-instance-connect",
 };
 
 export class JsonRouter {
@@ -176,6 +183,9 @@ export class QueryRouter {
 
     const sesV1Actions = ["VerifyEmailIdentity", "ListIdentities", "GetIdentityVerificationAttributes", "SendEmail", "DeleteIdentity", "VerifyDomainIdentity", "GetSendQuota", "GetSendStatistics"];
     if (sesV1Actions.includes(action)) return "email";
+
+    const sdbActions = ["CreateDomain", "ListDomains", "DeleteDomain", "PutAttributes", "GetAttributes", "Select"];
+    if (sdbActions.includes(action)) return "sdb";
 
     return "unknown";
   }
