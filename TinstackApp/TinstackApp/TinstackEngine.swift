@@ -102,6 +102,7 @@ final class TinstackEngine {
     }
 
     func stop() {
+        outputPipe?.fileHandleForReading.readabilityHandler = nil
         logParseTask?.cancel()
         logParseTask = nil
         process?.terminate()
@@ -138,14 +139,16 @@ final class TinstackEngine {
     // MARK: - Log Parsing
 
     private func startLogParsing(pipe: Pipe) {
-        logParseTask = Task.detached { [weak self] in
-            let handle = pipe.fileHandleForReading
-            while !Task.isCancelled {
-                let data = handle.availableData
-                if data.isEmpty { break }
-                guard let line = String(data: data, encoding: .utf8) else { continue }
-                for singleLine in line.split(separator: "\n") {
-                    await self?.parseLine(String(singleLine))
+        let handle = pipe.fileHandleForReading
+        handle.readabilityHandler = { [weak self] fileHandle in
+            let data = fileHandle.availableData
+            guard !data.isEmpty,
+                  let text = String(data: data, encoding: .utf8)
+            else { return }
+            for singleLine in text.split(separator: "\n") {
+                let line = String(singleLine)
+                Task { @MainActor [weak self] in
+                    self?.parseLine(line)
                 }
             }
         }
