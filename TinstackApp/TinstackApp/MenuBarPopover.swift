@@ -112,7 +112,7 @@ struct MenuBarPopover: View {
 
             if engine.requestLog.isEmpty {
                 VStack(spacing: 4) {
-                    Image(systemName: engine.isRunning ? "network" : "cloud.slash")
+                    Image(systemName: engine.isRunning ? "network" : "icloud.slash")
                         .font(.title2)
                         .foregroundStyle(.tertiary)
                     Text(engine.isRunning ? "Waiting for requests..." : "Start the server to see requests")
@@ -157,9 +157,7 @@ struct MenuBarPopover: View {
             }
             .buttonStyle(.plain)
 
-            Button {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            } label: {
+            SettingsLink {
                 Image(systemName: "gear")
                     .font(.caption)
             }

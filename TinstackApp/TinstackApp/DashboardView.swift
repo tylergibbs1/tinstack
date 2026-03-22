@@ -114,7 +114,7 @@ struct ServicesListView: View {
 
             if filteredServices.isEmpty && !engine.isRunning {
                 ContentUnavailableView {
-                    Label("Server Not Running", systemImage: "cloud.slash")
+                    Label("Server Not Running", systemImage: "icloud.slash")
                 } description: {
                     Text("Start the server to see active services")
                 }
