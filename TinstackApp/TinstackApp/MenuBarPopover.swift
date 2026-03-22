@@ -30,7 +30,6 @@ struct MenuBarPopover: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
         }
-        .background(.ultraThinMaterial)
     }
 
     // MARK: - Header
@@ -40,7 +39,7 @@ struct MenuBarPopover: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(engine.isRunning ? .green : .secondary)
+                        .fill(engine.isRunning ? Color.green : Color.gray)
                         .frame(width: 8, height: 8)
                     Text("Tinstack")
                         .font(.headline)
@@ -119,7 +118,8 @@ struct MenuBarPopover: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-                .frame(maxWidth: .infinity, minHeight: 120)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 1) {

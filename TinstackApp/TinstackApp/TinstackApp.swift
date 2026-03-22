@@ -7,7 +7,7 @@ struct TinstackApp: App {
     var body: some Scene {
         MenuBarExtra {
             MenuBarPopover(engine: engine)
-                .frame(width: 420, height: 520)
+                .frame(width: 400)
         } label: {
             Label {
                 Text("Tinstack")
