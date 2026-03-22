@@ -31,7 +31,7 @@ final class TinstackEngine {
         let service: String
     }
 
-    struct ServiceStat: Identifiable {
+    struct ServiceStat: Identifiable, Equatable {
         let id: String
         var name: String
         var requestCount: Int
@@ -154,10 +154,12 @@ final class TinstackEngine {
         }
     }
 
+    private static let logRegex: NSRegularExpression? = {
+        try? NSRegularExpression(pattern: #"(\w+)\s+(.+?)\s+→\s+(\d+)\s+\(([\d.]+)ms\)"#)
+    }()
+
     @MainActor
     private func parseLine(_ line: String) {
-        // Parse: 2026-03-22T18:00:54.943Z [INFO] POST AmazonSQS.SendMessage → 200 (0.1ms)
-        // Or:    2026-03-22T18:00:54.943Z [INFO] PUT /bucket/key → 200 (0.2ms)
         guard line.contains("→") else {
             // Startup lines like "Services: S3, SQS, ..."
             if line.contains("Services:") {
@@ -172,9 +174,7 @@ final class TinstackEngine {
             return
         }
 
-        // Extract: METHOD TARGET → STATUS (DURATIONms)
-        let regex = try? NSRegularExpression(pattern: #"(\w+)\s+(.+?)\s+→\s+(\d+)\s+\(([\d.]+)ms\)"#)
-        guard let regex,
+        guard let regex = Self.logRegex,
               let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
               match.numberOfRanges == 5 else { return }
 

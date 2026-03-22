@@ -17,7 +17,7 @@ struct DashboardView: View {
             ToolbarItem(placement: .navigation) {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(engine.isRunning ? .green : .secondary)
+                        .fill(engine.isRunning ? Color.green : Color.gray)
                         .frame(width: 8, height: 8)
                     Text(engine.isRunning ? "Running on :\(engine.port)" : "Stopped")
                         .font(.caption)
@@ -85,15 +85,10 @@ struct DashboardView: View {
 struct ServicesListView: View {
     @Bindable var engine: TinstackEngine
     @Binding var searchText: String
-
-    private var filteredServices: [TinstackEngine.ServiceStat] {
-        if searchText.isEmpty { return engine.serviceStats }
-        return engine.serviceStats.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-    }
+    @State private var filteredServices: [TinstackEngine.ServiceStat] = []
 
     var body: some View {
         VStack(spacing: 0) {
-            // Search bar
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
@@ -165,6 +160,17 @@ struct ServicesListView: View {
                 }
             }
         }
+        .onChange(of: searchText) { updateFilter() }
+        .onChange(of: engine.serviceStats) { updateFilter() }
+        .onAppear { updateFilter() }
+    }
+
+    private func updateFilter() {
+        if searchText.isEmpty {
+            filteredServices = engine.serviceStats
+        } else {
+            filteredServices = engine.serviceStats.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        }
     }
 }
 
@@ -174,23 +180,15 @@ struct RequestLogView: View {
     @Bindable var engine: TinstackEngine
     @State private var filterService = "All"
     @State private var filterStatus = "All"
-
-    private var filteredLog: [TinstackEngine.RequestEntry] {
-        engine.requestLog.filter { entry in
-            (filterService == "All" || entry.service == filterService) &&
-            (filterStatus == "All" ||
-             (filterStatus == "Success" && entry.status < 400) ||
-             (filterStatus == "Error" && entry.status >= 400))
-        }
-    }
+    @State private var filteredLog: [TinstackEngine.RequestEntry] = []
+    @State private var availableServices: [String] = []
 
     var body: some View {
         VStack(spacing: 0) {
-            // Filters
             HStack {
                 Picker("Service:", selection: $filterService) {
                     Text("All").tag("All")
-                    ForEach(Array(Set(engine.requestLog.map(\.service))).sorted(), id: \.self) { svc in
+                    ForEach(availableServices, id: \.self) { svc in
                         Text(svc).tag(svc)
                     }
                 }
@@ -267,6 +265,10 @@ struct RequestLogView: View {
                 }
             }
         }
+        .onChange(of: filterService) { updateLogFilter() }
+        .onChange(of: filterStatus) { updateLogFilter() }
+        .onChange(of: engine.requestLog.count) { updateLogFilter() }
+        .onAppear { updateLogFilter() }
     }
 
     private func methodColor(_ method: String) -> Color {
@@ -275,8 +277,18 @@ struct RequestLogView: View {
         case "POST": return .green
         case "PUT": return .orange
         case "DELETE": return .red
-        default: return .secondary
+        default: return .gray
         }
+    }
+
+    private func updateLogFilter() {
+        filteredLog = engine.requestLog.filter { entry in
+            (filterService == "All" || entry.service == filterService) &&
+            (filterStatus == "All" ||
+             (filterStatus == "Success" && entry.status < 400) ||
+             (filterStatus == "Error" && entry.status >= 400))
+        }
+        availableServices = Array(Set(engine.requestLog.map(\.service))).sorted()
     }
 }
 
@@ -284,28 +296,21 @@ struct RequestLogView: View {
 
 struct MetricsView: View {
     @Bindable var engine: TinstackEngine
-
-    private var topServices: [TinstackEngine.ServiceStat] {
-        engine.serviceStats
-            .filter { $0.requestCount > 0 }
-            .sorted { $0.requestCount > $1.requestCount }
-            .prefix(15)
-            .map { $0 }
-    }
+    @State private var topServices: [TinstackEngine.ServiceStat] = []
+    @State private var activeCount = 0
+    @State private var errorTotal = 0
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                // Summary cards
                 HStack(spacing: 16) {
                     MetricCard(title: "Total Requests", value: "\(engine.totalRequests)", icon: "arrow.up.arrow.down", color: .blue)
-                    MetricCard(title: "Active Services", value: "\(engine.serviceStats.filter { $0.requestCount > 0 }.count)", icon: "cube.box.fill", color: .green)
-                    MetricCard(title: "Total Errors", value: "\(engine.serviceStats.reduce(0) { $0 + $1.errorCount })", icon: "exclamationmark.triangle.fill", color: .red)
+                    MetricCard(title: "Active Services", value: "\(activeCount)", icon: "cube.box.fill", color: .green)
+                    MetricCard(title: "Total Errors", value: "\(errorTotal)", icon: "exclamationmark.triangle.fill", color: .red)
                     MetricCard(title: "Uptime", value: engine.uptime, icon: "clock.fill", color: .orange)
                 }
                 .padding(.horizontal)
 
-                // Top services bar chart
                 if !topServices.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Top Services by Request Count")
@@ -338,6 +343,18 @@ struct MetricsView: View {
             }
             .padding(.vertical)
         }
+        .onChange(of: engine.serviceStats) { updateMetrics() }
+        .onAppear { updateMetrics() }
+    }
+
+    private func updateMetrics() {
+        topServices = engine.serviceStats
+            .filter { $0.requestCount > 0 }
+            .sorted { $0.requestCount > $1.requestCount }
+            .prefix(15)
+            .map { $0 }
+        activeCount = topServices.count
+        errorTotal = engine.serviceStats.reduce(0) { $0 + $1.errorCount }
     }
 }
 
