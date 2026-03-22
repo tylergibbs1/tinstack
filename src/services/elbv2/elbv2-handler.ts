@@ -51,6 +51,14 @@ export class Elbv2QueryHandler {
         case "AddTags": return this.addTags(params, ctx);
         case "RemoveTags": return this.removeTags(params, ctx);
 
+        // Classic ELB actions
+        case "RegisterInstancesWithLoadBalancer": return this.registerInstances(params, ctx);
+        case "DeregisterInstancesFromLoadBalancer": return this.deregisterInstances(params, ctx);
+        case "ConfigureHealthCheck": return this.configureHealthCheck(params, ctx);
+        case "DescribeInstanceHealth": return this.describeInstanceHealth(params, ctx);
+        case "CreateLoadBalancerListeners": return this.createLoadBalancerListeners(params, ctx);
+        case "DeleteLoadBalancerListeners": return this.deleteLoadBalancerListeners(params, ctx);
+
         default:
           return xmlErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }
@@ -63,6 +71,12 @@ export class Elbv2QueryHandler {
   // --- Load Balancers ---
 
   private createLoadBalancer(params: URLSearchParams, ctx: RequestContext): Response {
+    // Detect classic ELB: uses LoadBalancerName param and Listeners instead of Name and Type
+    const classicName = params.get("LoadBalancerName");
+    if (classicName && !params.has("Name")) {
+      return this.createClassicLoadBalancer(params, ctx);
+    }
+
     const name = params.get("Name")!;
     const subnets = this.extractMembers(params, "Subnets.member");
     const securityGroups = this.extractMembers(params, "SecurityGroups.member");
@@ -76,6 +90,27 @@ export class Elbv2QueryHandler {
   }
 
   private describeLoadBalancers(params: URLSearchParams, ctx: RequestContext): Response {
+    // Classic ELB uses LoadBalancerNames.member.N
+    const classicNames = this.extractMembers(params, "LoadBalancerNames.member");
+    if (classicNames.length > 0) {
+      const lbs = this.service.describeClassicLoadBalancers(classicNames, ctx.region);
+      const classicNS = "http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/";
+      const xml = new XmlBuilder().start("LoadBalancerDescriptions");
+      for (const lb of lbs) {
+        xml.start("member")
+          .elem("LoadBalancerName", lb.loadBalancerName)
+          .elem("DNSName", lb.dnsName)
+          .elem("Scheme", lb.scheme)
+          .elem("CreatedTime", lb.createdTime)
+          .elem("VPCId", lb.vpcId)
+          .start("AvailabilityZones");
+        for (const az of lb.availabilityZones) xml.elem("member", az.zoneName);
+        xml.end("AvailabilityZones").end("member");
+      }
+      xml.end("LoadBalancerDescriptions");
+      return xmlResponse(xmlEnvelope("DescribeLoadBalancers", ctx.requestId, xml.build(), classicNS), ctx.requestId);
+    }
+
     const arns = this.extractMembers(params, "LoadBalancerArns.member");
     const names = this.extractMembers(params, "Names.member");
     const lbs = this.service.describeLoadBalancers(
@@ -90,6 +125,13 @@ export class Elbv2QueryHandler {
   }
 
   private deleteLoadBalancer(params: URLSearchParams, ctx: RequestContext): Response {
+    // Classic ELB uses LoadBalancerName, v2 uses LoadBalancerArn
+    const classicName = params.get("LoadBalancerName");
+    if (classicName && !params.has("LoadBalancerArn")) {
+      this.service.deleteClassicLoadBalancer(classicName, ctx.region);
+      const classicNS = "http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/";
+      return xmlResponse(xmlEnvelopeNoResult("DeleteLoadBalancer", ctx.requestId, classicNS), ctx.requestId);
+    }
     this.service.deleteLoadBalancer(params.get("LoadBalancerArn")!);
     return xmlResponse(xmlEnvelopeNoResult("DeleteLoadBalancer", ctx.requestId, NS), ctx.requestId);
   }
@@ -363,6 +405,119 @@ export class Elbv2QueryHandler {
     const tagKeys = this.extractMembers(params, "TagKeys.member");
     this.service.removeTags(arns, tagKeys);
     return xmlResponse(xmlEnvelopeNoResult("RemoveTags", ctx.requestId, NS), ctx.requestId);
+  }
+
+  // --- Classic ELB ---
+
+  private createClassicLoadBalancer(params: URLSearchParams, ctx: RequestContext): Response {
+    const name = params.get("LoadBalancerName")!;
+    const azs = this.extractMembers(params, "AvailabilityZones.member");
+    const subnets = this.extractMembers(params, "Subnets.member");
+    const securityGroups = this.extractMembers(params, "SecurityGroups.member");
+    const scheme = params.get("Scheme") ?? undefined;
+
+    const listeners: { protocol: string; loadBalancerPort: number; instanceProtocol: string; instancePort: number }[] = [];
+    let i = 1;
+    while (params.has(`Listeners.member.${i}.Protocol`)) {
+      listeners.push({
+        protocol: params.get(`Listeners.member.${i}.Protocol`)!,
+        loadBalancerPort: parseInt(params.get(`Listeners.member.${i}.LoadBalancerPort`)!),
+        instanceProtocol: params.get(`Listeners.member.${i}.InstanceProtocol`) ?? params.get(`Listeners.member.${i}.Protocol`)!,
+        instancePort: parseInt(params.get(`Listeners.member.${i}.InstancePort`)!),
+      });
+      i++;
+    }
+
+    const lb = this.service.createClassicLoadBalancer(name, listeners, azs, subnets, securityGroups, scheme, ctx.region);
+    const classicNS = "http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/";
+    const xml = new XmlBuilder().elem("DNSName", lb.dnsName);
+    return xmlResponse(xmlEnvelope("CreateLoadBalancer", ctx.requestId, xml.build(), classicNS), ctx.requestId);
+  }
+
+  private registerInstances(params: URLSearchParams, ctx: RequestContext): Response {
+    const name = params.get("LoadBalancerName")!;
+    const instances: { instanceId: string }[] = [];
+    let i = 1;
+    while (params.has(`Instances.member.${i}.InstanceId`)) {
+      instances.push({ instanceId: params.get(`Instances.member.${i}.InstanceId`)! });
+      i++;
+    }
+    const result = this.service.registerInstancesWithLoadBalancer(name, instances, ctx.region);
+    const classicNS = "http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/";
+    const xml = new XmlBuilder().start("Instances");
+    for (const inst of result) {
+      xml.start("member").elem("InstanceId", inst.instanceId).end("member");
+    }
+    xml.end("Instances");
+    return xmlResponse(xmlEnvelope("RegisterInstancesWithLoadBalancer", ctx.requestId, xml.build(), classicNS), ctx.requestId);
+  }
+
+  private deregisterInstances(params: URLSearchParams, ctx: RequestContext): Response {
+    const name = params.get("LoadBalancerName")!;
+    const instances: { instanceId: string }[] = [];
+    let i = 1;
+    while (params.has(`Instances.member.${i}.InstanceId`)) {
+      instances.push({ instanceId: params.get(`Instances.member.${i}.InstanceId`)! });
+      i++;
+    }
+    const result = this.service.deregisterInstancesFromLoadBalancer(name, instances, ctx.region);
+    const classicNS = "http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/";
+    const xml = new XmlBuilder().start("Instances");
+    for (const inst of result) {
+      xml.start("member").elem("InstanceId", inst.instanceId).end("member");
+    }
+    xml.end("Instances");
+    return xmlResponse(xmlEnvelope("DeregisterInstancesFromLoadBalancer", ctx.requestId, xml.build(), classicNS), ctx.requestId);
+  }
+
+  private configureHealthCheck(params: URLSearchParams, ctx: RequestContext): Response {
+    const name = params.get("LoadBalancerName")!;
+    const healthCheck = {
+      target: params.get("HealthCheck.Target") ?? "TCP:80",
+      interval: parseInt(params.get("HealthCheck.Interval") ?? "30"),
+      timeout: parseInt(params.get("HealthCheck.Timeout") ?? "5"),
+      unhealthyThreshold: parseInt(params.get("HealthCheck.UnhealthyThreshold") ?? "2"),
+      healthyThreshold: parseInt(params.get("HealthCheck.HealthyThreshold") ?? "10"),
+    };
+    const result = this.service.configureHealthCheck(name, healthCheck, ctx.region);
+    const classicNS = "http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/";
+    const xml = new XmlBuilder()
+      .start("HealthCheck")
+      .elem("Target", result.target)
+      .elem("Interval", result.interval)
+      .elem("Timeout", result.timeout)
+      .elem("UnhealthyThreshold", result.unhealthyThreshold)
+      .elem("HealthyThreshold", result.healthyThreshold)
+      .end("HealthCheck");
+    return xmlResponse(xmlEnvelope("ConfigureHealthCheck", ctx.requestId, xml.build(), classicNS), ctx.requestId);
+  }
+
+  private describeInstanceHealth(params: URLSearchParams, ctx: RequestContext): Response {
+    const name = params.get("LoadBalancerName")!;
+    const instances = this.service.describeInstanceHealth(name, ctx.region);
+    const classicNS = "http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/";
+    const xml = new XmlBuilder().start("InstanceStates");
+    for (const inst of instances) {
+      xml.start("member")
+        .elem("InstanceId", inst.instanceId)
+        .elem("State", inst.state)
+        .elem("Description", "N/A")
+        .elem("ReasonCode", "N/A")
+        .end("member");
+    }
+    xml.end("InstanceStates");
+    return xmlResponse(xmlEnvelope("DescribeInstanceHealth", ctx.requestId, xml.build(), classicNS), ctx.requestId);
+  }
+
+  private createLoadBalancerListeners(params: URLSearchParams, ctx: RequestContext): Response {
+    // Classic ELB listener creation is a no-op in our mock (listeners created at LB creation)
+    const classicNS = "http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/";
+    return xmlResponse(xmlEnvelopeNoResult("CreateLoadBalancerListeners", ctx.requestId, classicNS), ctx.requestId);
+  }
+
+  private deleteLoadBalancerListeners(params: URLSearchParams, ctx: RequestContext): Response {
+    const classicNS = "http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/";
+    return xmlResponse(xmlEnvelopeNoResult("DeleteLoadBalancerListeners", ctx.requestId, classicNS), ctx.requestId);
   }
 
   // --- XML helpers ---

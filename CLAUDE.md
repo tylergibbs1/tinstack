@@ -7,7 +7,7 @@ Lightweight AWS local emulator in TypeScript + Bun. Inspired by [floci](https://
 
 - `bun run start` — start the server on :4566
 - `bun run dev` — start with --watch for hot reload
-- `bun test` — run all tests (1064+ tests across 45 files)
+- `bun test` — run all tests (2120+ tests across 143 files)
 - `bun test tests/s3.test.ts` — run a single test file
 - `bun run build` — compile to standalone binary
 
@@ -21,7 +21,7 @@ Single HTTP server on port 4566. Routing by protocol:
 
 Each service: `Service` (business logic + storage) → `Handler` (protocol translation).
 
-## Enabled Services (38)
+## Enabled Services (135)
 
 | Category | Services |
 |---|---|
@@ -63,4 +63,4 @@ Each service: `Service` (business logic + storage) → `Handler` (protocol trans
 
 ## Testing
 
-1064+ tests across 45 files using real AWS SDK v3 clients pointed at the local emulator. Each test file starts the server in `beforeAll` and stops in `afterAll`. The shared test config is in `tests/helpers.ts`. Full suite runs in ~3.5s.
+2120+ tests across 143 files using real AWS SDK v3 clients pointed at the local emulator. Each test file starts the server in `beforeAll` and stops in `afterAll`. The shared test config is in `tests/helpers.ts`. Full suite runs in ~3.5s.

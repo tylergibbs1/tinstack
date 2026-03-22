@@ -30,6 +30,52 @@ const TARGET_PREFIX_MAP: Record<string, string> = {
   AWSGlue: "glue",
   Textract: "textract",
   AmazonBedrock: "bedrock",
+  AWSOrganizationsV20161128: "organizations",
+  CloudTrail_20131101: "cloudtrail",
+  StarlingDoveService: "config",
+  CodeBuild_20161006: "codebuild",
+  CodePipeline_20150709: "codepipeline",
+  CodeDeploy_20141006: "codedeploy",
+  RekognitionService: "rekognition",
+  Comprehend_20171127: "comprehend",
+  Transcribe: "transcribe",
+  AmazonForecast: "forecast",
+  ElasticMapReduce: "emr",
+  SageMaker: "sagemaker",
+  AWSBudgetServiceGateway: "budgets",
+  AWSInsightsIndexService: "ce",
+  AWSSupport_20130415: "support",
+  ACMPrivateCA: "acmpca",
+  AWSShield_20160616: "shield",
+  SWBExternalService: "ssoadmin",
+  AmazonEKS: "eks",
+  AnyScaleFrontendService: "applicationautoscaling",
+  Route53AutoNaming_v20170314: "servicediscovery",
+  TransferService: "transfer",
+  Timestream_20181101: "timestream",
+  DirectoryService_20150416: "directory-service",
+  AmazonMemoryDB: "memorydb",
+  KinesisAnalytics_20180523: "kinesis-analytics",
+  WorkspacesService: "workspaces",
+  AWSLakeFormation: "lakeformation",
+  Route53Resolver: "route53resolver",
+  OvertureService: "directconnect",
+  NetworkFirewall_20201112: "networkfirewall",
+  AmazonDMSv20160101: "dms",
+  FmrsService: "datasync",
+  AmazonDAXV3: "dax",
+  AWSSimbaAPIService_v20180301: "fsx",
+  AWSCognitoIdentityService: "cognito-identity",
+  CodeCommit_20150413: "codecommit",
+  ServiceQuotasV20190624: "service-quotas",
+  ResourceGroupsTaggingAPI_20170126: "resource-groups-tagging",
+  MediaStore_20170901: "mediastore",
+  BaldrApiService: "cloudhsmv2",
+  DataPipeline: "datapipeline",
+  AWSIdentityStore: "identitystore",
+  Route53Domains_v20140515: "route53domains",
+  AWSMPMeteringService: "meteringmarketplace",
+  CloudApiService: "cloudcontrol",
 };
 
 export class JsonRouter {
@@ -107,14 +153,29 @@ export class QueryRouter {
     const ec2Actions = ["CreateVpc", "DescribeVpcs", "DeleteVpc", "ModifyVpcAttribute", "CreateTags", "DescribeTags", "CreateSubnet", "DescribeSubnets", "DeleteSubnet", "ModifySubnetAttribute", "CreateSecurityGroup", "DescribeSecurityGroups", "DeleteSecurityGroup", "AuthorizeSecurityGroupIngress", "AuthorizeSecurityGroupEgress", "RevokeSecurityGroupIngress", "RevokeSecurityGroupEgress", "CreateInternetGateway", "DescribeInternetGateways", "DeleteInternetGateway", "AttachInternetGateway", "DetachInternetGateway", "CreateRouteTable", "DescribeRouteTables", "DeleteRouteTable", "CreateRoute", "DeleteRoute", "AssociateRouteTable", "DisassociateRouteTable", "CreateNatGateway", "DescribeNatGateways", "DeleteNatGateway", "AllocateAddress", "DescribeAddresses", "ReleaseAddress", "DescribeNetworkAcls", "DescribeAvailabilityZones", "DescribeRegions", "DescribeAccountAttributes", "RunInstances", "DescribeInstances", "TerminateInstances", "StartInstances", "StopInstances", "RebootInstances", "DescribeInstanceStatus", "ModifyInstanceAttribute", "CreateKeyPair", "DescribeKeyPairs", "DeleteKeyPair", "ImportKeyPair", "CreateVolume", "DescribeVolumes", "DeleteVolume", "AttachVolume", "DetachVolume", "ModifyVolume", "CreateImage", "DescribeImages", "DeregisterImage", "CopyImage", "CreateNetworkInterface", "DescribeNetworkInterfaces", "DeleteNetworkInterface", "AttachNetworkInterface", "DetachNetworkInterface", "CreateVpcEndpoint", "DescribeVpcEndpoints", "DeleteVpcEndpoints", "ModifyVpcEndpoint", "DescribeInstanceTypes"];
     if (ec2Actions.includes(action)) return "ec2";
 
-    const elbv2Actions = ["CreateLoadBalancer", "DescribeLoadBalancers", "DeleteLoadBalancer", "DescribeLoadBalancerAttributes", "ModifyLoadBalancerAttributes", "CreateTargetGroup", "DescribeTargetGroups", "DeleteTargetGroup", "DescribeTargetGroupAttributes", "ModifyTargetGroupAttributes", "ModifyTargetGroup", "CreateListener", "DescribeListeners", "DeleteListener", "ModifyListener", "RegisterTargets", "DeregisterTargets", "DescribeTargetHealth", "CreateRule", "DescribeRules", "DeleteRule", "ModifyRule", "SetRulePriorities", "DescribeTags", "AddTags", "RemoveTags"];
+    const elbv2Actions = ["CreateLoadBalancer", "DescribeLoadBalancers", "DeleteLoadBalancer", "DescribeLoadBalancerAttributes", "ModifyLoadBalancerAttributes", "CreateTargetGroup", "DescribeTargetGroups", "DeleteTargetGroup", "DescribeTargetGroupAttributes", "ModifyTargetGroupAttributes", "ModifyTargetGroup", "CreateListener", "DescribeListeners", "DeleteListener", "ModifyListener", "RegisterTargets", "DeregisterTargets", "DescribeTargetHealth", "CreateRule", "DescribeRules", "DeleteRule", "ModifyRule", "SetRulePriorities", "DescribeTags", "AddTags", "RemoveTags", "RegisterInstancesWithLoadBalancer", "DeregisterInstancesFromLoadBalancer", "ConfigureHealthCheck", "DescribeInstanceHealth", "CreateLoadBalancerListeners", "DeleteLoadBalancerListeners"];
     if (elbv2Actions.includes(action)) return "elasticloadbalancing";
+
+    const autoscalingActions = ["CreateAutoScalingGroup", "DescribeAutoScalingGroups", "UpdateAutoScalingGroup", "DeleteAutoScalingGroup", "CreateLaunchConfiguration", "DescribeLaunchConfigurations", "DeleteLaunchConfiguration", "SetDesiredCapacity", "DescribeScalingActivities", "PutScalingPolicy", "DescribePolicies", "DeletePolicy", "CreateOrUpdateTags"];
+    if (autoscalingActions.includes(action)) return "autoscaling";
+
+    const elasticacheActions = ["CreateCacheCluster", "DescribeCacheClusters", "DeleteCacheCluster", "ModifyCacheCluster", "CreateReplicationGroup", "DescribeReplicationGroups", "DeleteReplicationGroup", "CreateCacheSubnetGroup", "DescribeCacheSubnetGroups", "DeleteCacheSubnetGroup", "CreateCacheParameterGroup", "DescribeCacheParameterGroups"];
+    if (elasticacheActions.includes(action)) return "elasticache";
 
     const cfnActions = ["CreateStack", "DescribeStacks", "UpdateStack", "DeleteStack", "ListStacks", "GetTemplate", "DescribeStackResources", "DescribeStackEvents", "CreateChangeSet", "DescribeChangeSet", "ExecuteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListStackResources", "CreateStackSet", "DescribeStackSet", "ListStackSets", "DeleteStackSet", "CreateStackInstances", "ListStackInstances", "DeleteStackInstances"];
     if (cfnActions.includes(action)) return "cloudformation";
 
     const rdsActions = ["CreateDBInstance", "DescribeDBInstances", "ModifyDBInstance", "DeleteDBInstance", "CreateDBCluster", "DescribeDBClusters", "DeleteDBCluster", "CreateDBSubnetGroup", "DescribeDBSubnetGroups", "DeleteDBSubnetGroup", "CreateDBSnapshot", "DescribeDBSnapshots", "DeleteDBSnapshot", "DescribeDBEngineVersions", "CreateDBInstanceReadReplica", "PromoteReadReplica", "RebootDBInstance", "StartDBInstance", "StopDBInstance", "ModifyDBCluster", "CreateDBClusterSnapshot", "DescribeDBClusterSnapshots", "DeleteDBClusterSnapshot"];
     if (rdsActions.includes(action)) return "rds";
+
+    const redshiftActions = ["CreateCluster", "DescribeClusters", "DeleteCluster", "ModifyCluster", "PauseCluster", "ResumeCluster", "CreateClusterSubnetGroup", "DescribeClusterSubnetGroups", "DeleteClusterSubnetGroup", "CreateClusterParameterGroup", "DescribeClusterParameterGroups", "CreateClusterSnapshot", "DescribeClusterSnapshots", "DeleteClusterSnapshot", "RestoreFromClusterSnapshot", "CreateTags", "DescribeTags", "DeleteTags"];
+    if (redshiftActions.includes(action)) return "redshift";
+
+    const ebActions = ["CreateApplication", "DescribeApplications", "DeleteApplication", "CreateEnvironment", "DescribeEnvironments", "TerminateEnvironment", "UpdateEnvironment", "CreateApplicationVersion", "DescribeApplicationVersions"];
+    if (ebActions.includes(action)) return "elasticbeanstalk";
+
+    const sesV1Actions = ["VerifyEmailIdentity", "ListIdentities", "GetIdentityVerificationAttributes", "SendEmail", "DeleteIdentity", "VerifyDomainIdentity", "GetSendQuota", "GetSendStatistics"];
+    if (sesV1Actions.includes(action)) return "email";
 
     return "unknown";
   }

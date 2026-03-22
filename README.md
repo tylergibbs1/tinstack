@@ -1,6 +1,6 @@
 # tinstack
 
-A lightweight, zero-dependency AWS local emulator written in TypeScript and running on [Bun](https://bun.sh). All 38 emulated services sit behind a single HTTP endpoint (default `:4566`). Point any AWS SDK at `http://localhost:4566` and it just works.
+A lightweight, zero-dependency AWS local emulator written in TypeScript and running on [Bun](https://bun.sh). All 135 emulated services sit behind a single HTTP endpoint (default `:4566`). Point any AWS SDK at `http://localhost:4566` and it just works.
 
 Inspired by [floci](https://github.com/hectorvent/floci) (Java/Quarkus) — rewritten from scratch in TypeScript for contributor accessibility, Bun's batteries-included APIs, and single-binary distribution.
 
@@ -30,7 +30,7 @@ const s3 = new S3Client({
 });
 ```
 
-## Supported Services (38)
+## Supported Services (135)
 
 ### Core
 
@@ -187,7 +187,7 @@ provider "aws" {
 }
 ```
 
-All Terraform resource lifecycle operations (create, read, update, delete) are supported for the 38 emulated services, including read-back attributes, tagging, and policy stubs that Terraform requires during plan/apply/refresh cycles.
+All Terraform resource lifecycle operations (create, read, update, delete) are supported for the 135 emulated services, including read-back attributes, tagging, and policy stubs that Terraform requires during plan/apply/refresh cycles.
 
 ## Configuration
 
@@ -205,9 +205,9 @@ All configuration via environment variables:
 
 ## Performance
 
-- Startup: **~20ms** with all 38 services
+- Startup: **~20ms** with all 135 services
 - API response: **<1ms** for in-memory operations
-- 1064+ integration tests run in **~3.5s**
+- 2120+ integration tests run in **~5.5s**
 - Zero npm runtime dependencies — only Bun built-ins
 
 ## Storage Backends
@@ -226,7 +226,7 @@ Lambda supports three invocation modes, tried in order:
 
 ## Testing
 
-1064+ tests across 45 files covering happy paths, error paths, edge cases, cross-service integration, and end-to-end multi-service architecture tests. All tests use real AWS SDK v3 clients pointed at the emulator.
+2120+ tests across 143 files covering happy paths, error paths, edge cases, cross-service integration, and end-to-end multi-service architecture tests. All tests use real AWS SDK v3 clients pointed at the emulator.
 
 ```bash
 bun install           # Install dependencies

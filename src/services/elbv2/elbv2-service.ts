@@ -493,4 +493,134 @@ export class Elbv2Service {
   private findLbByName(name: string, region: string): LoadBalancer | undefined {
     return this.loadBalancers.values().find((lb) => lb.loadBalancerName === name && lb.loadBalancerArn.includes(`:${region}:`));
   }
+
+  // --- Classic ELB ---
+
+  createClassicLoadBalancer(
+    name: string,
+    listeners: { protocol: string; loadBalancerPort: number; instanceProtocol: string; instancePort: number }[],
+    availabilityZones: string[],
+    subnets: string[],
+    securityGroups: string[],
+    scheme: string | undefined,
+    region: string,
+  ): LoadBalancer {
+    if (this.findLbByName(name, region)) {
+      throw new AwsError("DuplicateLoadBalancerName", `A load balancer with the name '${name}' already exists.`, 400);
+    }
+
+    const lbId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    const arn = buildArn("elasticloadbalancing", region, this.accountId, "loadbalancer/", name);
+
+    const azs = availabilityZones.length > 0
+      ? availabilityZones.map((az) => ({ zoneName: az, subnetId: "" }))
+      : subnets.map((s, i) => ({ zoneName: `${region}${String.fromCharCode(97 + (i % 3))}`, subnetId: s }));
+
+    const lb: LoadBalancer = {
+      loadBalancerArn: arn,
+      loadBalancerName: name,
+      dnsName: `${name}-${lbId}.${region}.elb.amazonaws.com`,
+      scheme: scheme ?? "internet-facing",
+      type: "classic",
+      state: { code: "active" },
+      vpcId: `vpc-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`,
+      availabilityZones: azs,
+      securityGroups: securityGroups ?? [],
+      createdTime: new Date().toISOString(),
+      tags: {},
+      attributes: {},
+    };
+
+    // Store listeners as listener resources
+    for (const l of listeners) {
+      const listenerId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+      const listenerArn = buildArn("elasticloadbalancing", region, this.accountId, "listener/", `${name}/${listenerId}`);
+      const listener: Listener = {
+        listenerArn,
+        loadBalancerArn: arn,
+        protocol: l.protocol,
+        port: l.loadBalancerPort,
+        defaultActions: [{ type: "forward" }],
+        tags: {},
+      };
+      this.listeners.set(listenerArn, listener);
+    }
+
+    this.loadBalancers.set(arn, lb);
+    this.tags.set(arn, {});
+
+    // Store classic instance list
+    this.targets.set(arn, []);
+
+    return lb;
+  }
+
+  describeClassicLoadBalancers(names: string[] | undefined, region: string): LoadBalancer[] {
+    let lbs = this.loadBalancers.values().filter(
+      (lb) => lb.loadBalancerArn.includes(`:${region}:`) && lb.type === "classic",
+    );
+    if (names && names.length > 0) {
+      lbs = lbs.filter((lb) => names.includes(lb.loadBalancerName));
+      if (lbs.length === 0 && names.length > 0) {
+        throw new AwsError("LoadBalancerNotFound", `There is no ACTIVE Load Balancer named '${names[0]}'`, 400);
+      }
+    }
+    return lbs;
+  }
+
+  deleteClassicLoadBalancer(name: string, region: string): void {
+    const lb = this.findLbByName(name, region);
+    if (!lb) return; // Classic ELB delete is idempotent
+    // Delete listeners
+    for (const listener of this.listeners.values()) {
+      if (listener.loadBalancerArn === lb.loadBalancerArn) {
+        this.listeners.delete(listener.listenerArn);
+      }
+    }
+    this.loadBalancers.delete(lb.loadBalancerArn);
+    this.tags.delete(lb.loadBalancerArn);
+    this.targets.delete(lb.loadBalancerArn);
+  }
+
+  registerInstancesWithLoadBalancer(name: string, instances: { instanceId: string }[], region: string): { instanceId: string }[] {
+    const lb = this.findLbByName(name, region);
+    if (!lb) throw new AwsError("LoadBalancerNotFound", `There is no ACTIVE Load Balancer named '${name}'`, 400);
+    const existing = this.targets.get(lb.loadBalancerArn) ?? [];
+    for (const inst of instances) {
+      if (!existing.find((e) => e.id === inst.instanceId)) {
+        existing.push({ id: inst.instanceId });
+      }
+    }
+    this.targets.set(lb.loadBalancerArn, existing);
+    return existing.map((e) => ({ instanceId: e.id }));
+  }
+
+  deregisterInstancesFromLoadBalancer(name: string, instances: { instanceId: string }[], region: string): { instanceId: string }[] {
+    const lb = this.findLbByName(name, region);
+    if (!lb) throw new AwsError("LoadBalancerNotFound", `There is no ACTIVE Load Balancer named '${name}'`, 400);
+    const existing = this.targets.get(lb.loadBalancerArn) ?? [];
+    const idsToRemove = new Set(instances.map((i) => i.instanceId));
+    const remaining = existing.filter((e) => !idsToRemove.has(e.id));
+    this.targets.set(lb.loadBalancerArn, remaining);
+    return remaining.map((e) => ({ instanceId: e.id }));
+  }
+
+  describeInstanceHealth(name: string, region: string): { instanceId: string; state: string }[] {
+    const lb = this.findLbByName(name, region);
+    if (!lb) throw new AwsError("LoadBalancerNotFound", `There is no ACTIVE Load Balancer named '${name}'`, 400);
+    const instances = this.targets.get(lb.loadBalancerArn) ?? [];
+    return instances.map((i) => ({ instanceId: i.id, state: "InService" }));
+  }
+
+  configureHealthCheck(name: string, healthCheck: { target: string; interval: number; timeout: number; unhealthyThreshold: number; healthyThreshold: number }, region: string): typeof healthCheck {
+    const lb = this.findLbByName(name, region);
+    if (!lb) throw new AwsError("LoadBalancerNotFound", `There is no ACTIVE Load Balancer named '${name}'`, 400);
+    // Store health check config in attributes
+    lb.attributes["healthcheck.target"] = healthCheck.target;
+    lb.attributes["healthcheck.interval"] = String(healthCheck.interval);
+    lb.attributes["healthcheck.timeout"] = String(healthCheck.timeout);
+    lb.attributes["healthcheck.unhealthyThreshold"] = String(healthCheck.unhealthyThreshold);
+    lb.attributes["healthcheck.healthyThreshold"] = String(healthCheck.healthyThreshold);
+    return healthCheck;
+  }
 }
