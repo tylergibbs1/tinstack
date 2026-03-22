@@ -7,7 +7,7 @@ Lightweight AWS local emulator in TypeScript + Bun. Inspired by [floci](https://
 
 - `bun run start` — start the server on :4566
 - `bun run dev` — start with --watch for hot reload
-- `bun test` — run all tests (155 tests across 20 files)
+- `bun test` — run all tests (171+ tests across 24+ files)
 - `bun test tests/s3.test.ts` — run a single test file
 - `bun run build` — compile to standalone binary
 

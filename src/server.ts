@@ -51,6 +51,24 @@ import { DynamoDbStreamsHandler } from "./services/dynamodb/streams-handler";
 import { ApiGatewayService } from "./services/apigateway/apigateway-service";
 import { ApiGatewayHandler } from "./services/apigateway/apigateway-handler";
 
+// Phase 5 — Networking
+import { Ec2Service } from "./services/ec2/ec2-service";
+import { Ec2QueryHandler } from "./services/ec2/ec2-handler";
+
+// Phase 6 — DNS, Email, Certificates
+import { Route53Service } from "./services/route53/route53-service";
+import { Route53Handler } from "./services/route53/route53-handler";
+import { SesService } from "./services/ses/ses-service";
+import { SesHandler } from "./services/ses/ses-handler";
+import { AcmService } from "./services/acm/acm-service";
+import { AcmHandler } from "./services/acm/acm-handler";
+
+// Containers & Load Balancing
+import { EcrService } from "./services/ecr/ecr-service";
+import { EcrHandler } from "./services/ecr/ecr-handler";
+import { Elbv2Service } from "./services/elbv2/elbv2-service";
+import { Elbv2QueryHandler } from "./services/elbv2/elbv2-handler";
+
 function isEnabled(config: TinstackConfig, serviceName: string): boolean {
   if (config.enabledServices === "*") return true;
   return config.enabledServices.includes(serviceName);
@@ -188,6 +206,47 @@ export function createServer(config: TinstackConfig) {
     enabledNames.push("Step Functions");
   }
 
+  // Phase 5 — Networking
+  if (isEnabled(config, "ec2")) {
+    const ec2Service = new Ec2Service(config.defaultAccountId, config.defaultRegion);
+    const ec2QueryHandler = new Ec2QueryHandler(ec2Service);
+    queryRouter.register("ec2", (action, params, ctx) => ec2QueryHandler.handle(action, params, ctx));
+    enabledNames.push("EC2");
+  }
+
+  // Phase 6 — DNS, Email, Certificates
+  let route53Handler: Route53Handler | undefined;
+  if (isEnabled(config, "route53")) {
+    const route53Service = new Route53Service(config.defaultAccountId);
+    route53Handler = new Route53Handler(route53Service);
+    enabledNames.push("Route 53");
+  }
+
+  let sesHandler: SesHandler | undefined;
+  if (isEnabled(config, "ses")) {
+    const sesService = new SesService(config.defaultAccountId);
+    sesHandler = new SesHandler(sesService);
+    enabledNames.push("SES");
+  }
+
+  if (isEnabled(config, "acm")) {
+    jsonRouter.register("acm", new AcmHandler(new AcmService(config.defaultAccountId)));
+    enabledNames.push("ACM");
+  }
+
+  // Containers & Load Balancing
+  if (isEnabled(config, "ecr")) {
+    jsonRouter.register("ecr", new EcrHandler(new EcrService(config.defaultAccountId)));
+    enabledNames.push("ECR");
+  }
+
+  if (isEnabled(config, "elasticloadbalancing")) {
+    const elbv2Service = new Elbv2Service(config.defaultAccountId);
+    const elbv2QueryHandler = new Elbv2QueryHandler(elbv2Service);
+    queryRouter.register("elasticloadbalancing", (action, params, ctx) => elbv2QueryHandler.handle(action, params, ctx));
+    enabledNames.push("ELBv2");
+  }
+
   const s3Router = (globalThis as any).__tinstackS3Router as S3Router | undefined;
 
   const server = Bun.serve({
@@ -243,8 +302,20 @@ export function createServer(config: TinstackConfig) {
           return response;
         }
 
-        if (apiGatewayHandler && pathname.startsWith("/v2/apis")) {
+        if (apiGatewayHandler && (pathname.startsWith("/v2/apis") || pathname.startsWith("/v2/tags"))) {
           const response = await apiGatewayHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        if (route53Handler && pathname.startsWith("/2013-04-01/")) {
+          const response = await route53Handler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        if (sesHandler && pathname.startsWith("/v2/email/")) {
+          const response = await sesHandler.handleRoute(req, ctx);
           logRequest(req, response, startTime);
           return response;
         }

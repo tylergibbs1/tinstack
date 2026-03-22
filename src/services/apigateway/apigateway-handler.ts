@@ -75,6 +75,18 @@ export class ApiGatewayHandler {
       if (integrationMatch) {
         const [, apiId, integrationId] = integrationMatch;
         if (method === "GET") return this.json(integrationToJson(this.service.getIntegration(apiId, integrationId, ctx.region), apiId), ctx);
+        if (method === "PATCH") {
+          const body = await req.json();
+          const updated = this.service.updateIntegration(apiId, integrationId, {
+            integrationType: body.integrationType ?? body.IntegrationType,
+            integrationUri: body.integrationUri ?? body.IntegrationUri,
+            integrationMethod: body.integrationMethod ?? body.IntegrationMethod,
+            payloadFormatVersion: body.payloadFormatVersion ?? body.PayloadFormatVersion,
+            description: body.description ?? body.Description,
+            connectionType: body.connectionType ?? body.ConnectionType,
+          }, ctx.region);
+          return this.json(integrationToJson(updated, apiId), ctx);
+        }
         if (method === "DELETE") { this.service.deleteIntegration(apiId, integrationId, ctx.region); return this.empty(ctx); }
       }
 
@@ -97,7 +109,78 @@ export class ApiGatewayHandler {
         const [, apiId, rawStageName] = stageMatch;
         const stageName = decodeURIComponent(rawStageName);
         if (method === "GET") return this.json(stageToJson(this.service.getStage(apiId, stageName, ctx.region), apiId), ctx);
+        if (method === "PATCH") {
+          const body = await req.json();
+          const updated = this.service.updateStage(apiId, stageName, {
+            description: body.description ?? body.Description,
+            autoDeploy: body.autoDeploy ?? body.AutoDeploy,
+            deploymentId: body.deploymentId ?? body.DeploymentId,
+          }, ctx.region);
+          return this.json(stageToJson(updated, apiId), ctx);
+        }
         if (method === "DELETE") { this.service.deleteStage(apiId, stageName, ctx.region); return this.empty(ctx); }
+      }
+
+      // --- Deployments ---
+      const deploymentsMatch = path.match(/^\/v2\/apis\/([^/]+)\/deployments$/);
+      if (deploymentsMatch) {
+        const apiId = deploymentsMatch[1];
+        if (method === "POST") {
+          const body = await req.json();
+          const deployment = this.service.createDeployment(apiId, body.description ?? body.Description, ctx.region);
+          return this.json(deploymentToJson(deployment, apiId), ctx, 201);
+        }
+        if (method === "GET") {
+          return this.json({ items: this.service.getDeployments(apiId, ctx.region).map(d => deploymentToJson(d, apiId)) }, ctx);
+        }
+      }
+
+      // --- Authorizers ---
+      const authorizersMatch = path.match(/^\/v2\/apis\/([^/]+)\/authorizers$/);
+      if (authorizersMatch) {
+        const apiId = authorizersMatch[1];
+        if (method === "POST") {
+          const body = await req.json();
+          const authorizer = this.service.createAuthorizer(
+            apiId,
+            body.name ?? body.Name,
+            body.authorizerType ?? body.AuthorizerType,
+            body.authorizerUri ?? body.AuthorizerUri,
+            body.identitySource ?? body.IdentitySource,
+            body.jwtConfiguration ?? body.JwtConfiguration,
+            ctx.region,
+          );
+          return this.json(authorizerToJson(authorizer, apiId), ctx, 201);
+        }
+        if (method === "GET") {
+          return this.json({ items: this.service.getAuthorizers(apiId, ctx.region).map(a => authorizerToJson(a, apiId)) }, ctx);
+        }
+      }
+
+      const authorizerMatch = path.match(/^\/v2\/apis\/([^/]+)\/authorizers\/([^/]+)$/);
+      if (authorizerMatch) {
+        const [, apiId, authorizerId] = authorizerMatch;
+        if (method === "GET") return this.json(authorizerToJson(this.service.getAuthorizer(apiId, authorizerId, ctx.region), apiId), ctx);
+        if (method === "DELETE") { this.service.deleteAuthorizer(apiId, authorizerId, ctx.region); return this.empty(ctx); }
+      }
+
+      // --- Tags ---
+      const tagsMatch = path.match(/^\/v2\/tags\/(.+)$/);
+      if (tagsMatch) {
+        const arn = decodeURIComponent(tagsMatch[1]);
+        if (method === "GET") {
+          return this.json({ tags: this.service.getTags(arn) }, ctx);
+        }
+        if (method === "POST") {
+          const body = await req.json();
+          this.service.tagResource(arn, body.tags ?? body.Tags ?? {});
+          return this.json({}, ctx);
+        }
+        if (method === "DELETE") {
+          const tagKeys = url.searchParams.getAll("tagKeys");
+          this.service.untagResource(arn, tagKeys);
+          return this.empty(ctx);
+        }
       }
 
       return jsonErrorResponse(new AwsError("NotFoundException", `Unknown API Gateway operation: ${method} ${path}`, 404), ctx.requestId);
@@ -140,5 +223,16 @@ function integrationToJson(i: any, apiId: string) {
 }
 
 function stageToJson(s: any, apiId: string) {
-  return { apiId, stageName: s.stageName, description: s.description, autoDeploy: s.autoDeploy, createdDate: s.createdDate };
+  return { apiId, stageName: s.stageName, description: s.description, autoDeploy: s.autoDeploy, createdDate: s.createdDate, deploymentId: s.deploymentId };
+}
+
+function deploymentToJson(d: any, apiId: string) {
+  return { apiId, deploymentId: d.deploymentId, description: d.description, createdDate: d.createdDate, deploymentStatus: d.deploymentStatus, autoDeployed: d.autoDeployed };
+}
+
+function authorizerToJson(a: any, apiId: string) {
+  return {
+    apiId, authorizerId: a.authorizerId, authorizerType: a.authorizerType, name: a.name,
+    authorizerUri: a.authorizerUri, identitySource: a.identitySource, jwtConfiguration: a.jwtConfiguration,
+  };
 }

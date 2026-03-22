@@ -5,6 +5,12 @@ export interface S3Bucket {
   name: string;
   region: string;
   creationDate: string;
+  versioning: string; // "" | "Enabled" | "Suspended"
+  tags: Record<string, string>;
+  cors: any[];
+  policy: string | null;
+  encryption: any;
+  lifecycleRules: any[];
 }
 
 export interface S3Object {
@@ -17,6 +23,7 @@ export interface S3Object {
   lastModified: string;
   metadata: Record<string, string>;
   storageClass: string;
+  tags: Record<string, string>;
 }
 
 export interface MultipartUpload {
@@ -47,7 +54,11 @@ export class S3Service {
     if (this.buckets.has(name)) {
       throw new AwsError("BucketAlreadyOwnedByYou", `Your previous request to create the named bucket succeeded and you already own it.`, 409);
     }
-    const bucket: S3Bucket = { name, region, creationDate: new Date().toISOString() };
+    const bucket: S3Bucket = {
+      name, region, creationDate: new Date().toISOString(),
+      versioning: "", tags: {}, cors: [], policy: null,
+      encryption: null, lifecycleRules: [],
+    };
     this.buckets.set(name, bucket);
     return bucket;
   }
@@ -91,6 +102,7 @@ export class S3Service {
       lastModified: new Date().toUTCString(),
       metadata,
       storageClass: "STANDARD",
+      tags: {},
     };
     this.objects.set(this.objectKey(bucket, key), obj);
     return obj;
@@ -252,6 +264,7 @@ export class S3Service {
       lastModified: new Date().toUTCString(),
       metadata: upload.metadata,
       storageClass: "STANDARD",
+      tags: {},
     };
     this.objects.set(this.objectKey(bucket, key), obj);
     return obj;
@@ -285,6 +298,140 @@ export class S3Service {
     const b = this.buckets.get(bucket);
     if (!b) throw new AwsError("NoSuchBucket", `The specified bucket does not exist.`, 404);
     return b.region;
+  }
+
+  // Bucket versioning
+  getBucketVersioning(bucket: string): string {
+    const b = this.requireBucketReturn(bucket);
+    return b.versioning;
+  }
+
+  putBucketVersioning(bucket: string, status: string): void {
+    const b = this.requireBucketReturn(bucket);
+    b.versioning = status;
+  }
+
+  // Bucket tagging
+  getBucketTagging(bucket: string): Record<string, string> {
+    const b = this.requireBucketReturn(bucket);
+    return b.tags;
+  }
+
+  putBucketTagging(bucket: string, tags: Record<string, string>): void {
+    const b = this.requireBucketReturn(bucket);
+    b.tags = tags;
+  }
+
+  deleteBucketTagging(bucket: string): void {
+    const b = this.requireBucketReturn(bucket);
+    b.tags = {};
+  }
+
+  // Bucket policy
+  getBucketPolicy(bucket: string): string {
+    const b = this.requireBucketReturn(bucket);
+    if (!b.policy) throw new AwsError("NoSuchBucketPolicy", "The bucket policy does not exist", 404);
+    return b.policy;
+  }
+
+  putBucketPolicy(bucket: string, policy: string): void {
+    const b = this.requireBucketReturn(bucket);
+    b.policy = policy;
+  }
+
+  deleteBucketPolicy(bucket: string): void {
+    const b = this.requireBucketReturn(bucket);
+    b.policy = null;
+  }
+
+  // Bucket CORS
+  getBucketCors(bucket: string): any[] {
+    const b = this.requireBucketReturn(bucket);
+    if (b.cors.length === 0) throw new AwsError("NoSuchCORSConfiguration", "The CORS configuration does not exist", 404);
+    return b.cors;
+  }
+
+  putBucketCors(bucket: string, cors: any[]): void {
+    const b = this.requireBucketReturn(bucket);
+    b.cors = cors;
+  }
+
+  deleteBucketCors(bucket: string): void {
+    const b = this.requireBucketReturn(bucket);
+    b.cors = [];
+  }
+
+  // Object tagging
+  getObjectTagging(bucket: string, key: string): Record<string, string> {
+    const obj = this.getObject(bucket, key);
+    return obj.tags;
+  }
+
+  putObjectTagging(bucket: string, key: string, tags: Record<string, string>): void {
+    const obj = this.getObject(bucket, key);
+    obj.tags = tags;
+  }
+
+  deleteObjectTagging(bucket: string, key: string): void {
+    const obj = this.getObject(bucket, key);
+    obj.tags = {};
+  }
+
+  // ListObjectsV1
+  listObjectsV1(bucket: string, prefix: string = "", delimiter: string = "", maxKeys: number = 1000, marker?: string): {
+    contents: S3Object[];
+    commonPrefixes: string[];
+    isTruncated: boolean;
+    nextMarker?: string;
+  } {
+    this.requireBucket(bucket);
+    const bucketPrefix = `${bucket}/`;
+    let allKeys = this.objects.keys()
+      .filter((k) => k.startsWith(bucketPrefix))
+      .map((k) => k.slice(bucketPrefix.length))
+      .filter((k) => k.startsWith(prefix))
+      .sort();
+
+    if (marker) {
+      allKeys = allKeys.filter((k) => k > marker);
+    }
+
+    const commonPrefixes = new Set<string>();
+    const contents: S3Object[] = [];
+    let totalCount = 0;
+
+    for (const key of allKeys) {
+      if (totalCount >= maxKeys) break;
+      if (delimiter) {
+        const rest = key.slice(prefix.length);
+        const delimIdx = rest.indexOf(delimiter);
+        if (delimIdx >= 0) {
+          const cp = prefix + rest.slice(0, delimIdx + delimiter.length);
+          if (!commonPrefixes.has(cp)) {
+            commonPrefixes.add(cp);
+            totalCount++;
+          }
+          continue;
+        }
+      }
+      const obj = this.objects.get(this.objectKey(bucket, key))!;
+      contents.push(obj);
+      totalCount++;
+    }
+
+    const isTruncated = totalCount >= maxKeys;
+    let nextMarker: string | undefined;
+    if (isTruncated && contents.length > 0) {
+      nextMarker = contents[contents.length - 1].key;
+    }
+
+    return { contents, commonPrefixes: [...commonPrefixes], isTruncated, nextMarker };
+  }
+
+  private requireBucketReturn(name: string): S3Bucket {
+    const b = this.buckets.get(name);
+    if (!b) throw new AwsError("NoSuchBucket", `The specified bucket does not exist.`, 404);
+    return b;
   }
 
   private requireBucket(name: string): void {

@@ -39,10 +39,33 @@ export interface ApiStage {
   deploymentId?: string;
 }
 
+export interface ApiDeployment {
+  deploymentId: string;
+  description?: string;
+  createdDate: string;
+  deploymentStatus: string;
+  autoDeployed: boolean;
+}
+
+export interface ApiAuthorizer {
+  authorizerId: string;
+  authorizerType: string;
+  name: string;
+  authorizerUri?: string;
+  identitySource?: string;
+  authorizerResultTtlInSeconds?: number;
+  jwtConfiguration?: { audience?: string[]; issuer?: string };
+}
+
 export class ApiGatewayService {
   private apis: StorageBackend<string, HttpApi>;
+  private deployments: Map<string, ApiDeployment[]> = new Map(); // regionKey(apiId) -> deployments
+  private authorizers: Map<string, ApiAuthorizer[]> = new Map(); // regionKey(apiId) -> authorizers
+  private resourceTags: Map<string, Record<string, string>> = new Map(); // arn -> tags
   private routeCounter = 0;
   private integrationCounter = 0;
+  private deploymentCounter = 0;
+  private authorizerCounter = 0;
 
   constructor(
     private accountId: string,
@@ -180,5 +203,100 @@ export class ApiGatewayService {
 
   getStages(apiId: string, region: string): ApiStage[] {
     return this.getApi(apiId, region).stages;
+  }
+
+  updateIntegration(apiId: string, integrationId: string, updates: Partial<ApiIntegration>, region: string): ApiIntegration {
+    const integration = this.getIntegration(apiId, integrationId, region);
+    if (updates.integrationType !== undefined) integration.integrationType = updates.integrationType;
+    if (updates.integrationUri !== undefined) integration.integrationUri = updates.integrationUri;
+    if (updates.integrationMethod !== undefined) integration.integrationMethod = updates.integrationMethod;
+    if (updates.payloadFormatVersion !== undefined) integration.payloadFormatVersion = updates.payloadFormatVersion;
+    if (updates.description !== undefined) integration.description = updates.description;
+    if (updates.connectionType !== undefined) integration.connectionType = updates.connectionType;
+    return integration;
+  }
+
+  updateStage(apiId: string, stageName: string, updates: Partial<ApiStage>, region: string): ApiStage {
+    const stage = this.getStage(apiId, stageName, region);
+    if (updates.description !== undefined) stage.description = updates.description;
+    if (updates.autoDeploy !== undefined) stage.autoDeploy = updates.autoDeploy;
+    if (updates.deploymentId !== undefined) stage.deploymentId = updates.deploymentId;
+    return stage;
+  }
+
+  // Deployments
+  createDeployment(apiId: string, description: string | undefined, region: string): ApiDeployment {
+    this.getApi(apiId, region);
+    const key = this.regionKey(region, apiId);
+    const deploymentId = `d${++this.deploymentCounter}`;
+    const deployment: ApiDeployment = {
+      deploymentId,
+      description,
+      createdDate: new Date().toISOString(),
+      deploymentStatus: "DEPLOYED",
+      autoDeployed: false,
+    };
+    if (!this.deployments.has(key)) this.deployments.set(key, []);
+    this.deployments.get(key)!.push(deployment);
+    return deployment;
+  }
+
+  getDeployments(apiId: string, region: string): ApiDeployment[] {
+    this.getApi(apiId, region);
+    return this.deployments.get(this.regionKey(region, apiId)) ?? [];
+  }
+
+  // Authorizers
+  createAuthorizer(apiId: string, name: string, authorizerType: string, authorizerUri: string | undefined, identitySource: string | undefined, jwtConfiguration: any | undefined, region: string): ApiAuthorizer {
+    this.getApi(apiId, region);
+    const key = this.regionKey(region, apiId);
+    const authorizerId = `a${++this.authorizerCounter}`;
+    const authorizer: ApiAuthorizer = {
+      authorizerId,
+      authorizerType,
+      name,
+      authorizerUri,
+      identitySource,
+      jwtConfiguration,
+    };
+    if (!this.authorizers.has(key)) this.authorizers.set(key, []);
+    this.authorizers.get(key)!.push(authorizer);
+    return authorizer;
+  }
+
+  getAuthorizers(apiId: string, region: string): ApiAuthorizer[] {
+    this.getApi(apiId, region);
+    return this.authorizers.get(this.regionKey(region, apiId)) ?? [];
+  }
+
+  getAuthorizer(apiId: string, authorizerId: string, region: string): ApiAuthorizer {
+    const authorizers = this.getAuthorizers(apiId, region);
+    const authorizer = authorizers.find((a) => a.authorizerId === authorizerId);
+    if (!authorizer) throw new AwsError("NotFoundException", `Authorizer ${authorizerId} not found.`, 404);
+    return authorizer;
+  }
+
+  deleteAuthorizer(apiId: string, authorizerId: string, region: string): void {
+    const key = this.regionKey(region, apiId);
+    const authorizers = this.authorizers.get(key) ?? [];
+    this.authorizers.set(key, authorizers.filter((a) => a.authorizerId !== authorizerId));
+  }
+
+  // Tags
+  getTags(arn: string): Record<string, string> {
+    return this.resourceTags.get(arn) ?? {};
+  }
+
+  tagResource(arn: string, tags: Record<string, string>): void {
+    const existing = this.resourceTags.get(arn) ?? {};
+    Object.assign(existing, tags);
+    this.resourceTags.set(arn, existing);
+  }
+
+  untagResource(arn: string, tagKeys: string[]): void {
+    const existing = this.resourceTags.get(arn);
+    if (existing) {
+      for (const key of tagKeys) delete existing[key];
+    }
   }
 }

@@ -36,6 +36,38 @@ export class CognitoHandler {
         case "InitiateAuth":
         case "AdminInitiateAuth":
           return this.initiateAuth(body, ctx);
+        case "ForgotPassword":
+          return this.json(this.service.forgotPassword(body.ClientId, body.Username, ctx.region), ctx);
+        case "ConfirmForgotPassword":
+          this.service.confirmForgotPassword(body.ClientId, body.Username, body.ConfirmationCode, body.Password, ctx.region);
+          return this.json({}, ctx);
+        case "ChangePassword":
+          this.service.changePassword(body.AccessToken, body.PreviousPassword, body.ProposedPassword);
+          return this.json({}, ctx);
+        case "AdminSetUserPassword":
+          this.service.adminSetUserPassword(body.UserPoolId, body.Username, body.Password, body.Permanent ?? false, ctx.region);
+          return this.json({}, ctx);
+        case "AdminConfirmSignUp":
+          this.service.adminConfirmSignUp(body.UserPoolId, body.Username, ctx.region);
+          return this.json({}, ctx);
+        case "GetUser": {
+          const user = this.service.getUserByAccessToken(body.AccessToken);
+          return this.json({
+            Username: user.username,
+            UserAttributes: Object.entries(user.attributes).map(([Name, Value]) => ({ Name, Value })),
+            UserCreateDate: user.createdDate,
+            UserLastModifiedDate: user.lastModifiedDate,
+          }, ctx);
+        }
+        case "RespondToAuthChallenge":
+        case "AdminRespondToAuthChallenge": {
+          const clientId = body.ClientId;
+          const result = this.service.respondToAuthChallenge(clientId, body.ChallengeName, body.ChallengeResponses ?? {}, ctx.region);
+          return this.json(result, ctx);
+        }
+        case "GlobalSignOut":
+          this.service.globalSignOut(body.AccessToken);
+          return this.json({}, ctx);
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }

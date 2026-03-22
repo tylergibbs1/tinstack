@@ -30,45 +30,56 @@ const s3 = new S3Client({
 });
 ```
 
-## Supported Services (18)
+## Supported Services (24)
 
 ### Core (Phase 1)
 
 | Service | Key Operations |
 |---|---|
-| **S3** | CreateBucket, PutObject, GetObject, DeleteObject, ListObjectsV2, CopyObject, HeadObject, multipart upload, presigned URLs, virtual-host routing |
+| **S3** | CreateBucket, PutObject, GetObject, DeleteObject, ListObjectsV1/V2, CopyObject, HeadObject, multipart upload, presigned URLs, virtual-host routing, versioning, tagging, CORS, bucket policies |
 | **SQS** | CreateQueue, SendMessage, ReceiveMessage, DeleteMessage, PurgeQueue, FIFO queues with deduplication, dead-letter queues, batch operations, visibility timeouts |
-| **DynamoDB** | CreateTable, PutItem, GetItem, UpdateItem, DeleteItem, Query, Scan, BatchWrite/Get, transactions, condition/filter/update/projection expressions, GSI/LSI, TTL |
-| **SSM Parameter Store** | PutParameter, GetParameter, GetParametersByPath, DeleteParameter, versioning, pagination |
-| **Secrets Manager** | CreateSecret, GetSecretValue, UpdateSecret, PutSecretValue, DeleteSecret, version stages (AWSCURRENT/AWSPREVIOUS), random passwords |
+| **DynamoDB** | CreateTable, PutItem, GetItem, UpdateItem, DeleteItem, Query, Scan, BatchWrite/Get, transactions, condition/filter/update/projection expressions, GSI/LSI, TTL, tagging |
+| **SSM Parameter Store** | PutParameter, GetParameter, GetParametersByPath, DeleteParameter, versioning, pagination, filters |
+| **Secrets Manager** | CreateSecret, GetSecretValue, UpdateSecret, PutSecretValue, DeleteSecret, version stages (AWSCURRENT/AWSPREVIOUS), random passwords, resource policies |
 
 ### Messaging & Events (Phase 2)
 
 | Service | Key Operations |
 |---|---|
-| **SNS** | CreateTopic, Publish, Subscribe, Unsubscribe, topic attributes, subscription filtering |
-| **EventBridge** | PutEvents, PutRule, PutTargets, CreateEventBus, rule management, target management |
-| **Kinesis** | CreateStream, PutRecord, PutRecords, GetShardIterator, GetRecords, shard management |
+| **SNS** | CreateTopic, Publish, Subscribe, Unsubscribe, topic/subscription attributes, tagging, subscription confirmation |
+| **EventBridge** | PutEvents, PutRule, PutTargets, CreateEventBus, rule management, target management, tagging |
+| **Kinesis** | CreateStream, PutRecord, PutRecords, GetShardIterator, GetRecords, DescribeStreamSummary, tagging, retention period |
 
 ### Auth & Compute (Phase 3)
 
 | Service | Key Operations |
 |---|---|
 | **STS** | GetCallerIdentity, AssumeRole, GetSessionToken |
-| **IAM** | CreateRole, CreateUser, CreatePolicy, AttachRolePolicy, inline policies, access keys, instance profiles, tagging |
-| **KMS** | CreateKey, Encrypt, Decrypt, GenerateDataKey, CreateAlias, key enable/disable/schedule deletion |
-| **Cognito** | CreateUserPool, CreateUserPoolClient, SignUp, ConfirmSignUp, AdminCreateUser, InitiateAuth (USER_PASSWORD_AUTH), JWT token generation |
-| **Lambda** | CreateFunction, Invoke (Docker / in-process / mock), UpdateFunctionCode, UpdateFunctionConfiguration, event source mappings, tagging |
+| **IAM** | CreateRole, CreateUser, CreatePolicy, AttachRolePolicy, inline policies, access keys, instance profiles, tagging, GetPolicy/GetPolicyVersion |
+| **KMS** | CreateKey, Encrypt, Decrypt, GenerateDataKey, CreateAlias, key enable/disable/schedule deletion, key policies, rotation status, tagging |
+| **Cognito** | CreateUserPool, CreateUserPoolClient, SignUp, ConfirmSignUp, AdminCreateUser, InitiateAuth, ForgotPassword, ChangePassword, AdminConfirmSignUp, JWT token generation |
+| **Lambda** | CreateFunction, Invoke (Docker / in-process / mock), UpdateFunctionCode/Configuration, event source mappings, versions, permissions, tagging |
 
 ### Infrastructure (Phase 4)
 
 | Service | Key Operations |
 |---|---|
-| **CloudWatch Logs** | CreateLogGroup, CreateLogStream, PutLogEvents, GetLogEvents, FilterLogEvents, retention policies |
+| **CloudWatch Logs** | CreateLogGroup, CreateLogStream, PutLogEvents, GetLogEvents, FilterLogEvents, retention policies, tagging |
 | **CloudWatch Metrics** | PutMetricData, GetMetricData, GetMetricStatistics, ListMetrics, PutMetricAlarm, DescribeAlarms |
 | **DynamoDB Streams** | ListStreams, DescribeStream, GetShardIterator, GetRecords (INSERT/MODIFY/REMOVE events) |
-| **API Gateway v2** | CreateApi (HTTP API), routes, integrations (AWS_PROXY, HTTP_PROXY), stages |
+| **API Gateway v2** | CreateApi (HTTP API), routes, integrations, stages, deployments, authorizers, tagging |
 | **Step Functions** | CreateStateMachine, StartExecution, full ASL engine — Task, Pass, Wait, Choice (And/Or/Not), Parallel, Map, Succeed, Fail, Retry with backoff, Catch error handling |
+
+### Networking & Containers (Phase 5)
+
+| Service | Key Operations |
+|---|---|
+| **EC2 / VPC** | VPCs, Subnets, Security Groups, Internet Gateways, Route Tables, NAT Gateways, Elastic IPs, Network ACLs, Availability Zones, tagging |
+| **ELBv2** | Application/Network Load Balancers, Target Groups, Listeners, attributes, tagging |
+| **ECR** | CreateRepository, DescribeRepositories, GetAuthorizationToken, PutImage, lifecycle policies, tagging |
+| **Route 53** | Hosted Zones, Resource Record Sets (A, AAAA, CNAME, MX, TXT, NS, SOA), tagging |
+| **SES v2** | Email identities, SendEmail, account info |
+| **ACM** | RequestCertificate, DescribeCertificate, ListCertificates, tagging |
 
 ## Terraform Support
 
@@ -124,9 +135,9 @@ All configuration via environment variables:
 
 ## Performance
 
-- Startup: **~19ms** with all 18 services
+- Startup: **~20ms** with all 24 services
 - API response: **<1ms** for in-memory operations
-- 155 integration tests run in **~1.7s**
+- 171+ integration tests run in **~1.9s**
 - Zero npm runtime dependencies — only Bun built-ins
 
 ## Storage Backends
@@ -145,7 +156,7 @@ Lambda supports three invocation modes, tried in order:
 
 ## Testing
 
-155 tests across 20 files covering happy paths, error paths, edge cases, and end-to-end multi-service architecture tests. All tests use real AWS SDK v3 clients pointed at the emulator.
+171+ tests across 24+ files covering happy paths, error paths, edge cases, and end-to-end multi-service architecture tests. All tests use real AWS SDK v3 clients pointed at the emulator.
 
 ```bash
 bun install           # Install dependencies
@@ -183,9 +194,9 @@ docker build -t tinstack . && docker run -p 4566:4566 tinstack
 
 Single `Bun.serve()` HTTP server routing by AWS protocol:
 
-- **JSON 1.0/1.1** — `X-Amz-Target` header dispatches to service handlers (DynamoDB, SQS, SSM, Secrets Manager, SNS, EventBridge, Kinesis, KMS, Cognito, CloudWatch, Step Functions)
-- **Query/XML** — `Action` form param dispatches to handlers (STS, IAM, SNS legacy, SQS legacy)
-- **REST** — URL path matching for Lambda (`/2015-03-31/functions/...`) and API Gateway (`/v2/apis/...`)
+- **JSON 1.0/1.1** — `X-Amz-Target` header dispatches to service handlers (DynamoDB, SQS, SSM, Secrets Manager, SNS, EventBridge, Kinesis, KMS, Cognito, CloudWatch, Step Functions, ACM, ECR)
+- **Query/XML** — `Action` form param dispatches to handlers (STS, IAM, EC2, ELBv2, SNS legacy, SQS legacy)
+- **REST** — URL path matching for Lambda (`/2015-03-31/functions/...`), API Gateway (`/v2/apis/...`), Route 53 (`/2013-04-01/...`), SES (`/v2/email/...`)
 - **S3** — Fallback handler supporting both path-style and virtual-host routing
 
 Each service follows a consistent pattern: **Service** (business logic + storage) → **Handler** (protocol translation).

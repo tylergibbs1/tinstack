@@ -73,6 +73,9 @@ export class CognitoService {
   private poolCounter = 0;
   private clientIdToPoolId: Map<string, string> = new Map();
   private refreshTokenToUsername: Map<string, { username: string; userPoolId: string }> = new Map();
+  private confirmationCodes: Map<string, string> = new Map(); // "poolId#username" -> code
+  private accessTokenToUser: Map<string, { username: string; userPoolId: string }> = new Map();
+  private invalidatedRefreshTokens: Set<string> = new Set();
 
   constructor(private accountId: string) {
     this.pools = new InMemoryStorage();
@@ -261,7 +264,7 @@ export class CognitoService {
     return users.slice(0, limit ?? 60);
   }
 
-  initiateAuth(userPoolId: string, clientId: string, authFlow: string, authParameters: Record<string, string>, region: string): { AuthenticationResult?: AuthResult; ChallengeName?: string } {
+  initiateAuth(userPoolId: string, clientId: string, authFlow: string, authParameters: Record<string, string>, region: string): { AuthenticationResult?: AuthResult; ChallengeName?: string; Session?: string; ChallengeParameters?: Record<string, string> } {
     this.describeUserPool(userPoolId, region);
 
     if (authFlow === "USER_PASSWORD_AUTH" || authFlow === "ADMIN_USER_PASSWORD_AUTH") {
@@ -273,11 +276,27 @@ export class CognitoService {
       if (user.password !== password) throw new AwsError("NotAuthorizedException", "Incorrect username or password.", 400);
       if (!user.confirmed) throw new AwsError("UserNotConfirmedException", "User is not confirmed.", 400);
 
+      // If user is in FORCE_CHANGE_PASSWORD status, issue challenge
+      if (user.userStatus === "FORCE_CHANGE_PASSWORD") {
+        const session = Buffer.from(crypto.randomUUID()).toString("base64");
+        return {
+          ChallengeName: "NEW_PASSWORD_REQUIRED",
+          Session: session,
+          ChallengeParameters: {
+            USER_ID_FOR_SRP: username,
+            userAttributes: JSON.stringify(Object.entries(user.attributes).map(([Name, Value]) => ({ Name, Value }))),
+          },
+        };
+      }
+
       return { AuthenticationResult: this.generateTokens(user, userPoolId, clientId, region) };
     }
 
     if (authFlow === "REFRESH_TOKEN_AUTH" || authFlow === "REFRESH_TOKEN") {
       const refreshToken = authParameters.REFRESH_TOKEN;
+      if (this.invalidatedRefreshTokens.has(refreshToken)) {
+        throw new AwsError("NotAuthorizedException", "Refresh token has been revoked.", 400);
+      }
       const tokenInfo = this.refreshTokenToUsername.get(refreshToken);
       let sub: string;
       let username: string;
@@ -304,6 +323,118 @@ export class CognitoService {
     throw new AwsError("InvalidParameterException", `Auth flow ${authFlow} is not supported.`, 400);
   }
 
+  forgotPassword(clientId: string, username: string, region: string): { CodeDeliveryDetails: any } {
+    const poolId = this.resolvePoolIdFromClientId(clientId);
+    const user = this.getUser(poolId, username);
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    this.confirmationCodes.set(`${poolId}#${username}`, code);
+
+    const email = user.attributes.email ?? "u***@e***.com";
+    const masked = email.replace(/^(.).*(@.).*(\..*)$/, "$1***$2***$3");
+    return {
+      CodeDeliveryDetails: {
+        Destination: masked,
+        DeliveryMedium: "EMAIL",
+        AttributeName: "email",
+      },
+    };
+  }
+
+  confirmForgotPassword(clientId: string, username: string, confirmationCode: string, password: string, region: string): void {
+    const poolId = this.resolvePoolIdFromClientId(clientId);
+    const key = `${poolId}#${username}`;
+    const storedCode = this.confirmationCodes.get(key);
+    if (!storedCode || storedCode !== confirmationCode) {
+      throw new AwsError("CodeMismatchException", "Invalid verification code provided.", 400);
+    }
+    const user = this.getUser(poolId, username);
+    user.password = password;
+    user.lastModifiedDate = Date.now() / 1000;
+    this.confirmationCodes.delete(key);
+  }
+
+  changePassword(accessToken: string, previousPassword: string, proposedPassword: string): void {
+    const userInfo = this.resolveUserFromAccessToken(accessToken);
+    const user = this.getUser(userInfo.userPoolId, userInfo.username);
+    if (user.password !== previousPassword) {
+      throw new AwsError("NotAuthorizedException", "Incorrect username or password.", 400);
+    }
+    user.password = proposedPassword;
+    user.lastModifiedDate = Date.now() / 1000;
+  }
+
+  adminSetUserPassword(userPoolId: string, username: string, password: string, permanent: boolean, region: string): void {
+    const user = this.getUser(userPoolId, username);
+    user.password = password;
+    if (permanent) {
+      user.userStatus = "CONFIRMED";
+    } else {
+      user.userStatus = "FORCE_CHANGE_PASSWORD";
+    }
+    user.lastModifiedDate = Date.now() / 1000;
+  }
+
+  adminConfirmSignUp(userPoolId: string, username: string, region: string): void {
+    const user = this.getUser(userPoolId, username);
+    user.userStatus = "CONFIRMED";
+    user.confirmed = true;
+    user.lastModifiedDate = Date.now() / 1000;
+  }
+
+  getUserByAccessToken(accessToken: string): CognitoUser {
+    const userInfo = this.resolveUserFromAccessToken(accessToken);
+    return this.getUser(userInfo.userPoolId, userInfo.username);
+  }
+
+  respondToAuthChallenge(clientId: string, challengeName: string, challengeResponses: Record<string, string>, region: string): { AuthenticationResult?: AuthResult } {
+    const poolId = this.resolvePoolIdFromClientId(clientId);
+
+    if (challengeName === "NEW_PASSWORD_REQUIRED") {
+      const username = challengeResponses.USERNAME;
+      const newPassword = challengeResponses.NEW_PASSWORD;
+      if (!username || !newPassword) {
+        throw new AwsError("InvalidParameterException", "USERNAME and NEW_PASSWORD are required.", 400);
+      }
+      const user = this.getUser(poolId, username);
+      user.password = newPassword;
+      user.userStatus = "CONFIRMED";
+      user.lastModifiedDate = Date.now() / 1000;
+      return { AuthenticationResult: this.generateTokens(user, poolId, clientId, region) };
+    }
+
+    throw new AwsError("InvalidParameterException", `Challenge ${challengeName} is not supported.`, 400);
+  }
+
+  globalSignOut(accessToken: string): void {
+    const userInfo = this.resolveUserFromAccessToken(accessToken);
+    // Invalidate all refresh tokens for this user
+    for (const [token, info] of this.refreshTokenToUsername.entries()) {
+      if (info.username === userInfo.username && info.userPoolId === userInfo.userPoolId) {
+        this.invalidatedRefreshTokens.add(token);
+      }
+    }
+  }
+
+  private resolveUserFromAccessToken(accessToken: string): { username: string; userPoolId: string } {
+    // Try the cached mapping first
+    const cached = this.accessTokenToUser.get(accessToken);
+    if (cached) return cached;
+    // Decode the JWT to find the username
+    try {
+      const parts = accessToken.split(".");
+      if (parts.length !== 3) throw new Error("Invalid token");
+      const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
+      if (!payload.username) throw new Error("No username in token");
+      // Extract pool ID from iss: https://cognito-idp.{region}.amazonaws.com/{poolId}
+      const iss = payload.iss ?? "";
+      const poolId = iss.split("/").pop() ?? "";
+      if (!poolId) throw new Error("No pool ID in token");
+      return { username: payload.username, userPoolId: poolId };
+    } catch {
+      throw new AwsError("NotAuthorizedException", "Invalid access token.", 400);
+    }
+  }
+
   private getUser(userPoolId: string, username: string): CognitoUser {
     const key = `${userPoolId}#${username}`;
     const user = this.users.get(key);
@@ -315,8 +446,10 @@ export class CognitoService {
     const sub = user.attributes.sub ?? crypto.randomUUID();
     const refreshToken = Buffer.from(crypto.randomUUID()).toString("base64");
     this.refreshTokenToUsername.set(refreshToken, { username: user.username, userPoolId });
+    const accessToken = this.generateJwt({ sub, username: user.username, token_use: "access", client_id: clientId }, region, userPoolId);
+    this.accessTokenToUser.set(accessToken, { username: user.username, userPoolId });
     return {
-      AccessToken: this.generateJwt({ sub, username: user.username, token_use: "access", client_id: clientId }, region, userPoolId),
+      AccessToken: accessToken,
       IdToken: this.generateJwt({ sub, username: user.username, token_use: "id", email: user.attributes.email, ...user.attributes }, region, userPoolId),
       RefreshToken: refreshToken,
       ExpiresIn: 3600,

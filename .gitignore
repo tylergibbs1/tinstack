@@ -41,3 +41,4 @@ data/
 tinstack
 tinstack-*
 .breadcrumbs.json
+tests/terraform/

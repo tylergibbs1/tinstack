@@ -21,6 +21,8 @@ const TARGET_PREFIX_MAP: Record<string, string> = {
   "SNS_20100331": "sns",
   AWSStepFunctions: "stepfunctions",
   GraniteServiceVersion20100801: "cloudwatch",
+  CertificateManager: "acm",
+  AmazonEC2ContainerRegistry_V20150921: "ecr",
 };
 
 export class JsonRouter {
@@ -94,6 +96,12 @@ export class QueryRouter {
 
     const stsActions = ["GetCallerIdentity", "AssumeRole", "GetSessionToken"];
     if (stsActions.includes(action)) return "sts";
+
+    const ec2Actions = ["CreateVpc", "DescribeVpcs", "DeleteVpc", "ModifyVpcAttribute", "CreateTags", "DescribeTags", "CreateSubnet", "DescribeSubnets", "DeleteSubnet", "ModifySubnetAttribute", "CreateSecurityGroup", "DescribeSecurityGroups", "DeleteSecurityGroup", "AuthorizeSecurityGroupIngress", "AuthorizeSecurityGroupEgress", "RevokeSecurityGroupIngress", "RevokeSecurityGroupEgress", "CreateInternetGateway", "DescribeInternetGateways", "DeleteInternetGateway", "AttachInternetGateway", "DetachInternetGateway", "CreateRouteTable", "DescribeRouteTables", "DeleteRouteTable", "CreateRoute", "DeleteRoute", "AssociateRouteTable", "DisassociateRouteTable", "CreateNatGateway", "DescribeNatGateways", "DeleteNatGateway", "AllocateAddress", "DescribeAddresses", "ReleaseAddress", "DescribeNetworkAcls", "DescribeAvailabilityZones", "DescribeRegions", "DescribeAccountAttributes"];
+    if (ec2Actions.includes(action)) return "ec2";
+
+    const elbv2Actions = ["CreateLoadBalancer", "DescribeLoadBalancers", "DeleteLoadBalancer", "DescribeLoadBalancerAttributes", "ModifyLoadBalancerAttributes", "CreateTargetGroup", "DescribeTargetGroups", "DeleteTargetGroup", "DescribeTargetGroupAttributes", "ModifyTargetGroupAttributes", "CreateListener", "DescribeListeners", "DeleteListener", "DescribeTags", "AddTags", "RemoveTags"];
+    if (elbv2Actions.includes(action)) return "elasticloadbalancing";
 
     return "unknown";
   }
