@@ -45,14 +45,32 @@ interface StoredDatapoint {
   timestamp: number;
   value: number;
   unit: string;
+  // StatisticValues fields (when present, use these instead of value)
+  sampleCount?: number;
+  sum?: number;
+  minimum?: number;
+  maximum?: number;
 }
+
+const TWO_WEEKS_SECONDS = 14 * 24 * 60 * 60;
+const PRUNE_INTERVAL = 1000;
 
 export class CloudWatchMetricsService {
   private datapoints: StoredDatapoint[] = [];
   private alarms: StorageBackend<string, MetricAlarm>;
+  private insertsSincePrune = 0;
 
   constructor(private accountId: string) {
     this.alarms = new InMemoryStorage();
+  }
+
+  private maybePrune(): void {
+    this.insertsSincePrune++;
+    if (this.insertsSincePrune >= PRUNE_INTERVAL) {
+      this.insertsSincePrune = 0;
+      const cutoff = Date.now() / 1000 - TWO_WEEKS_SECONDS;
+      this.datapoints = this.datapoints.filter((dp) => dp.timestamp >= cutoff);
+    }
   }
 
   private regionKey(region: string, name: string): string {
@@ -68,17 +86,23 @@ export class CloudWatchMetricsService {
 
       if (datum.Value !== undefined) {
         this.datapoints.push({ namespace, metricName: datum.MetricName, dimensions: dims, timestamp: ts, value: datum.Value, unit });
+        this.maybePrune();
       } else if (datum.Values) {
         const counts = datum.Counts ?? datum.Values.map(() => 1);
         for (let i = 0; i < datum.Values.length; i++) {
           for (let c = 0; c < (counts[i] ?? 1); c++) {
             this.datapoints.push({ namespace, metricName: datum.MetricName, dimensions: dims, timestamp: ts, value: datum.Values[i], unit });
+            this.maybePrune();
           }
         }
       } else if (datum.StatisticValues) {
         const sv = datum.StatisticValues;
-        // Store as individual aggregate record
-        this.datapoints.push({ namespace, metricName: datum.MetricName, dimensions: dims, timestamp: ts, value: sv.Sum / sv.SampleCount, unit });
+        this.datapoints.push({
+          namespace, metricName: datum.MetricName, dimensions: dims, timestamp: ts,
+          value: 0, unit,
+          sampleCount: sv.SampleCount, sum: sv.Sum, minimum: sv.Minimum, maximum: sv.Maximum,
+        });
+        this.maybePrune();
       }
     }
   }
@@ -105,25 +129,18 @@ export class CloudWatchMetricsService {
       });
 
       // Aggregate by period
-      const buckets = new Map<number, number[]>();
+      const buckets = new Map<number, StoredDatapoint[]>();
       for (const dp of matching) {
         const bucket = Math.floor(dp.timestamp / period) * period;
         if (!buckets.has(bucket)) buckets.set(bucket, []);
-        buckets.get(bucket)!.push(dp.value);
+        buckets.get(bucket)!.push(dp);
       }
 
       const timestamps: number[] = [];
       const values: number[] = [];
-      for (const [ts, vals] of [...buckets.entries()].sort((a, b) => a[0] - b[0])) {
+      for (const [ts, dps] of [...buckets.entries()].sort((a, b) => a[0] - b[0])) {
         timestamps.push(ts);
-        switch (stat) {
-          case "Sum": values.push(vals.reduce((a, b) => a + b, 0)); break;
-          case "Average": values.push(vals.reduce((a, b) => a + b, 0) / vals.length); break;
-          case "Minimum": values.push(Math.min(...vals)); break;
-          case "Maximum": values.push(Math.max(...vals)); break;
-          case "SampleCount": values.push(vals.length); break;
-          default: values.push(vals.reduce((a, b) => a + b, 0) / vals.length);
-        }
+        values.push(computeStat(dps, stat));
       }
 
       return { Id: q.Id, Label: q.Label ?? metric.MetricName, Timestamps: timestamps, Values: values, StatusCode: "Complete" };
@@ -144,23 +161,17 @@ export class CloudWatchMetricsService {
       return true;
     });
 
-    const buckets = new Map<number, number[]>();
+    const buckets = new Map<number, StoredDatapoint[]>();
     for (const dp of matching) {
       const bucket = Math.floor(dp.timestamp / period) * period;
       if (!buckets.has(bucket)) buckets.set(bucket, []);
-      buckets.get(bucket)!.push(dp.value);
+      buckets.get(bucket)!.push(dp);
     }
 
-    const datapoints = [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([ts, vals]) => {
+    const datapoints = [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([ts, dps]) => {
       const dp: any = { Timestamp: ts, Unit: matching[0]?.unit ?? "None" };
       for (const stat of statistics) {
-        switch (stat) {
-          case "Sum": dp.Sum = vals.reduce((a, b) => a + b, 0); break;
-          case "Average": dp.Average = vals.reduce((a, b) => a + b, 0) / vals.length; break;
-          case "Minimum": dp.Minimum = Math.min(...vals); break;
-          case "Maximum": dp.Maximum = Math.max(...vals); break;
-          case "SampleCount": dp.SampleCount = vals.length; break;
-        }
+        dp[stat] = computeStat(dps, stat);
       }
       return dp;
     });
@@ -224,5 +235,37 @@ export class CloudWatchMetricsService {
     for (const name of alarmNames) {
       this.alarms.delete(this.regionKey(region, name));
     }
+  }
+}
+
+function computeStat(dps: StoredDatapoint[], stat: string): number {
+  let totalSum = 0;
+  let totalCount = 0;
+  let min = Infinity;
+  let max = -Infinity;
+
+  for (const dp of dps) {
+    if (dp.sampleCount !== undefined) {
+      // StatisticValues datapoint
+      totalSum += dp.sum!;
+      totalCount += dp.sampleCount;
+      if (dp.minimum! < min) min = dp.minimum!;
+      if (dp.maximum! > max) max = dp.maximum!;
+    } else {
+      // Raw value datapoint
+      totalSum += dp.value;
+      totalCount += 1;
+      if (dp.value < min) min = dp.value;
+      if (dp.value > max) max = dp.value;
+    }
+  }
+
+  switch (stat) {
+    case "Sum": return totalSum;
+    case "SampleCount": return totalCount;
+    case "Average": return totalCount > 0 ? totalSum / totalCount : 0;
+    case "Minimum": return min;
+    case "Maximum": return max;
+    default: return totalCount > 0 ? totalSum / totalCount : 0;
   }
 }

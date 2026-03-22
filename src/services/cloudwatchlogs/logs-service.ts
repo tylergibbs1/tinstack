@@ -47,7 +47,7 @@ export class CloudWatchLogsService {
     if (this.logGroups.has(key)) throw new AwsError("ResourceAlreadyExistsException", `Log group ${logGroupName} already exists.`, 400);
     this.logGroups.set(key, {
       logGroupName,
-      arn: buildArn("logs", region, this.accountId, "log-group:", logGroupName),
+      arn: buildArn("logs", region, this.accountId, "log-group:", logGroupName) + ":*",
       creationTime: Date.now(),
       retentionInDays,
       storedBytes: 0,
@@ -101,7 +101,10 @@ export class CloudWatchLogsService {
   }
 
   deleteLogStream(logGroupName: string, logStreamName: string, region: string): void {
-    const sKey = `${this.regionKey(region, logGroupName)}/${logStreamName}`;
+    const gKey = this.regionKey(region, logGroupName);
+    if (!this.logGroups.has(gKey)) throw new AwsError("ResourceNotFoundException", `Log group ${logGroupName} not found.`, 400);
+    const sKey = `${gKey}/${logStreamName}`;
+    if (!this.logStreams.has(sKey)) throw new AwsError("ResourceNotFoundException", `Log stream ${logStreamName} not found.`, 400);
     this.logStreams.delete(sKey);
     this.logEvents.delete(sKey);
   }
@@ -140,7 +143,7 @@ export class CloudWatchLogsService {
     return { nextSequenceToken: token };
   }
 
-  getLogEvents(logGroupName: string, logStreamName: string, startTime: number | undefined, endTime: number | undefined, limit: number | undefined, region: string): { events: LogEvent[]; nextForwardToken: string; nextBackwardToken: string } {
+  getLogEvents(logGroupName: string, logStreamName: string, startTime: number | undefined, endTime: number | undefined, limit: number | undefined, nextToken: string | undefined, region: string): { events: LogEvent[]; nextForwardToken: string; nextBackwardToken: string } {
     const sKey = `${this.regionKey(region, logGroupName)}/${logStreamName}`;
     const stored = this.logEvents.get(sKey);
     if (!stored) throw new AwsError("ResourceNotFoundException", `Log stream ${logStreamName} not found.`, 400);
@@ -150,13 +153,21 @@ export class CloudWatchLogsService {
     if (endTime) filtered = filtered.filter((e) => e.timestamp <= endTime);
     filtered.sort((a, b) => a.timestamp - b.timestamp);
 
+    let startOffset = 0;
+    if (nextToken) {
+      const parts = nextToken.split("/");
+      if (parts.length === 2) {
+        startOffset = parseInt(parts[1], 10) || 0;
+      }
+    }
+
     const maxEvents = limit ?? 10000;
-    const events = filtered.slice(0, maxEvents);
+    const events = filtered.slice(startOffset, startOffset + maxEvents);
 
     return {
       events,
-      nextForwardToken: `f/${events.length}`,
-      nextBackwardToken: `b/0`,
+      nextForwardToken: `f/${startOffset + events.length}`,
+      nextBackwardToken: `b/${startOffset}`,
     };
   }
 
@@ -189,6 +200,19 @@ export class CloudWatchLogsService {
   tagLogGroup(logGroupName: string, tags: Record<string, string>, region: string): void {
     const key = this.regionKey(region, logGroupName);
     const group = this.logGroups.get(key);
-    if (group) Object.assign(group.tags, tags);
+    if (!group) throw new AwsError("ResourceNotFoundException", `Log group ${logGroupName} not found.`, 400);
+    Object.assign(group.tags, tags);
+  }
+
+  getLogGroupTags(logGroupName: string, region: string): Record<string, string> {
+    const key = this.regionKey(region, logGroupName);
+    const group = this.logGroups.get(key);
+    return group?.tags ?? {};
+  }
+
+  untagLogGroup(logGroupName: string, tagKeys: string[], region: string): void {
+    const key = this.regionKey(region, logGroupName);
+    const group = this.logGroups.get(key);
+    if (group) for (const k of tagKeys) delete group.tags[k];
   }
 }

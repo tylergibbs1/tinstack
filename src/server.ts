@@ -237,7 +237,7 @@ export function createServer(config: TinstackConfig) {
         // REST-style services (Lambda, API Gateway) — route by path prefix
         const pathname = new URL(req.url).pathname;
 
-        if (lambdaHandler && (pathname.startsWith("/2015-03-31/functions") || pathname.startsWith("/2015-03-31/event-source-mappings") || pathname.startsWith("/2019-09-25/tags"))) {
+        if (lambdaHandler && (pathname.startsWith("/2015-03-31/functions") || pathname.startsWith("/2015-03-31/event-source-mappings") || pathname.startsWith("/2019-09-25/tags") || pathname.startsWith("/2020-06-30/functions"))) {
           const response = await lambdaHandler.handleRoute(req, ctx);
           logRequest(req, response, startTime);
           return response;

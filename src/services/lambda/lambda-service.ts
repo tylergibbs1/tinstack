@@ -24,6 +24,7 @@ export interface LambdaFunction {
   architectures: string[];
   layers: string[];
   tags: Record<string, string>;
+  revisionId: string;
   // Internal
   codeZip?: Buffer;
   codePath?: string;
@@ -103,6 +104,7 @@ export class LambdaService {
       architectures: params.Architectures ?? ["x86_64"],
       layers: params.Layers ?? [],
       tags: params.Tags ?? {},
+      revisionId: crypto.randomUUID(),
       codeZip,
       codePath,
     };
@@ -146,6 +148,7 @@ export class LambdaService {
     }
     fn.lastModified = new Date().toISOString();
     fn.lastUpdateStatus = "Successful";
+    fn.revisionId = crypto.randomUUID();
     return fn;
   }
 
@@ -161,6 +164,7 @@ export class LambdaService {
     if (params.Layers) fn.layers = params.Layers;
     fn.lastModified = new Date().toISOString();
     fn.lastUpdateStatus = "Successful";
+    fn.revisionId = crypto.randomUUID();
     return fn;
   }
 
@@ -216,9 +220,11 @@ export class LambdaService {
     });
   }
 
-  deleteEventSourceMapping(uuid: string): void {
-    if (!this.eventSourceMappings.has(uuid)) throw new AwsError("ResourceNotFoundException", "Event source mapping not found.", 404);
+  deleteEventSourceMapping(uuid: string): EventSourceMapping {
+    const mapping = this.eventSourceMappings.get(uuid);
+    if (!mapping) throw new AwsError("ResourceNotFoundException", "Event source mapping not found.", 404);
     this.eventSourceMappings.delete(uuid);
+    return mapping;
   }
 
   getEventSourceMapping(uuid: string): EventSourceMapping {

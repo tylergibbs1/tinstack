@@ -26,6 +26,29 @@ export class IamQueryHandler {
         case "CreatePolicy": return this.createPolicy(params, ctx);
         case "DeletePolicy": return this.deletePolicy(params, ctx);
         case "ListPolicies": return this.listPolicies(params, ctx);
+        case "ListRolePolicies": return this.listRolePolicies(params, ctx);
+        case "GetPolicy": return this.getPolicy(params, ctx);
+        case "GetPolicyVersion": return this.getPolicyVersion(params, ctx);
+        case "ListAttachedRolePolicies": return this.listAttachedRolePolicies(params, ctx);
+        case "ListPolicyVersions": {
+          const policyArn = params.get("PolicyArn")!;
+          const policy = this.service.getPolicy(policyArn);
+          const xml = new XmlBuilder().start("Versions")
+            .start("member")
+            .elem("VersionId", "v1")
+            .elem("IsDefaultVersion", "true")
+            .elem("Document", encodeURIComponent(policy.policyDocument))
+            .elem("CreateDate", policy.createDate)
+            .end("member")
+            .end("Versions")
+            .elem("IsTruncated", "false");
+          return xmlResponse(xmlEnvelope("ListPolicyVersions", ctx.requestId, xml.build(), NS), ctx.requestId);
+        }
+        case "ListInstanceProfilesForRole": {
+          // Terraform checks this before deleting a role. Return empty list.
+          const xml = new XmlBuilder().start("InstanceProfiles").end("InstanceProfiles").elem("IsTruncated", "false");
+          return xmlResponse(xmlEnvelope("ListInstanceProfilesForRole", ctx.requestId, xml.build(), NS), ctx.requestId);
+        }
         default:
           return xmlErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }
@@ -35,15 +58,29 @@ export class IamQueryHandler {
     }
   }
 
+  private roleFieldsXml(role: any): string {
+    const xml = new XmlBuilder()
+      .elem("RoleName", role.roleName)
+      .elem("RoleId", role.roleId)
+      .elem("Arn", role.arn)
+      .elem("Path", role.path)
+      .elem("CreateDate", role.createDate)
+      .elem("AssumeRolePolicyDocument", encodeURIComponent(role.assumeRolePolicyDocument));
+    if (role.description) xml.elem("Description", role.description);
+    if (role.tags && Object.keys(role.tags).length > 0) {
+      xml.start("Tags");
+      for (const [k, v] of Object.entries(role.tags)) {
+        xml.start("member").elem("Key", k).elem("Value", v as string).end("member");
+      }
+      xml.end("Tags");
+    }
+    return xml.build();
+  }
+
   private roleXml(role: any): string {
     return new XmlBuilder()
       .start("Role")
-        .elem("RoleName", role.roleName)
-        .elem("RoleId", role.roleId)
-        .elem("Arn", role.arn)
-        .elem("Path", role.path)
-        .elem("CreateDate", role.createDate)
-        .elem("AssumeRolePolicyDocument", encodeURIComponent(role.assumeRolePolicyDocument))
+      .raw(this.roleFieldsXml(role))
       .end("Role")
       .build();
   }
@@ -78,7 +115,7 @@ export class IamQueryHandler {
   private listRoles(params: URLSearchParams, ctx: RequestContext): Response {
     const roles = this.service.listRoles(params.get("PathPrefix") ?? undefined);
     const xml = new XmlBuilder().start("Roles");
-    for (const r of roles) xml.raw(`<member>${this.roleXml(r)}</member>`);
+    for (const r of roles) xml.raw(`<member>${this.roleFieldsXml(r)}</member>`);
     xml.end("Roles").elem("IsTruncated", false);
     return xmlResponse(xmlEnvelope("ListRoles", ctx.requestId, xml.build(), NS), ctx.requestId);
   }
@@ -104,7 +141,13 @@ export class IamQueryHandler {
   }
 
   private createUser(params: URLSearchParams, ctx: RequestContext): Response {
-    const user = this.service.createUser(params.get("UserName")!, params.get("Path") ?? "/", {});
+    const tags: Record<string, string> = {};
+    let i = 1;
+    while (params.has(`Tags.member.${i}.Key`)) {
+      tags[params.get(`Tags.member.${i}.Key`)!] = params.get(`Tags.member.${i}.Value`)!;
+      i++;
+    }
+    const user = this.service.createUser(params.get("UserName")!, params.get("Path") ?? "/", tags);
     const result = new XmlBuilder()
       .start("User")
         .elem("UserName", user.userName)
@@ -182,5 +225,56 @@ export class IamQueryHandler {
     }
     xml.end("Policies").elem("IsTruncated", false);
     return xmlResponse(xmlEnvelope("ListPolicies", ctx.requestId, xml.build(), NS), ctx.requestId);
+  }
+
+  private listRolePolicies(params: URLSearchParams, ctx: RequestContext): Response {
+    const policyNames = this.service.listRolePolicies(params.get("RoleName")!);
+    const xml = new XmlBuilder().start("PolicyNames");
+    for (const name of policyNames) {
+      xml.elem("member", name);
+    }
+    xml.end("PolicyNames").elem("IsTruncated", false);
+    return xmlResponse(xmlEnvelope("ListRolePolicies", ctx.requestId, xml.build(), NS), ctx.requestId);
+  }
+
+  private getPolicy(params: URLSearchParams, ctx: RequestContext): Response {
+    const policy = this.service.getPolicy(params.get("PolicyArn")!);
+    const result = new XmlBuilder()
+      .start("Policy")
+        .elem("PolicyName", policy.policyName).elem("PolicyId", policy.policyId)
+        .elem("Arn", policy.arn).elem("Path", policy.path)
+        .elem("DefaultVersionId", policy.defaultVersionId)
+        .elem("AttachmentCount", policy.attachmentCount)
+        .elem("IsAttachable", true)
+        .elem("CreateDate", policy.createDate)
+      .end("Policy")
+      .build();
+    return xmlResponse(xmlEnvelope("GetPolicy", ctx.requestId, result, NS), ctx.requestId);
+  }
+
+  private getPolicyVersion(params: URLSearchParams, ctx: RequestContext): Response {
+    const version = this.service.getPolicyVersion(params.get("PolicyArn")!, params.get("VersionId")!);
+    const result = new XmlBuilder()
+      .start("PolicyVersion")
+        .elem("Document", encodeURIComponent(version.document))
+        .elem("VersionId", version.versionId)
+        .elem("IsDefaultVersion", version.isDefaultVersion)
+        .elem("CreateDate", version.createDate)
+      .end("PolicyVersion")
+      .build();
+    return xmlResponse(xmlEnvelope("GetPolicyVersion", ctx.requestId, result, NS), ctx.requestId);
+  }
+
+  private listAttachedRolePolicies(params: URLSearchParams, ctx: RequestContext): Response {
+    const policies = this.service.listAttachedRolePolicies(params.get("RoleName")!);
+    const xml = new XmlBuilder().start("AttachedPolicies");
+    for (const p of policies) {
+      xml.start("member")
+        .elem("PolicyName", p.policyName)
+        .elem("PolicyArn", p.policyArn)
+        .end("member");
+    }
+    xml.end("AttachedPolicies").elem("IsTruncated", false);
+    return xmlResponse(xmlEnvelope("ListAttachedRolePolicies", ctx.requestId, xml.build(), NS), ctx.requestId);
   }
 }

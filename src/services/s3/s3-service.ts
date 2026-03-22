@@ -149,23 +149,28 @@ export class S3Service {
 
     const commonPrefixes = new Set<string>();
     const contents: S3Object[] = [];
+    let totalCount = 0;
 
     for (const key of allKeys) {
+      if (totalCount >= maxKeys) break;
       if (delimiter) {
         const rest = key.slice(prefix.length);
         const delimIdx = rest.indexOf(delimiter);
         if (delimIdx >= 0) {
-          commonPrefixes.add(prefix + rest.slice(0, delimIdx + delimiter.length));
+          const cp = prefix + rest.slice(0, delimIdx + delimiter.length);
+          if (!commonPrefixes.has(cp)) {
+            commonPrefixes.add(cp);
+            totalCount++;
+          }
           continue;
         }
       }
-      if (contents.length < maxKeys) {
-        const obj = this.objects.get(this.objectKey(bucket, key))!;
-        contents.push(obj);
-      }
+      const obj = this.objects.get(this.objectKey(bucket, key))!;
+      contents.push(obj);
+      totalCount++;
     }
 
-    const isTruncated = contents.length >= maxKeys;
+    const isTruncated = totalCount >= maxKeys;
     let nextContinuationToken: string | undefined;
     if (isTruncated && contents.length > 0) {
       nextContinuationToken = Buffer.from(contents[contents.length - 1].key).toString("base64");
@@ -220,8 +225,36 @@ export class S3Service {
     }
 
     const combinedData = Buffer.concat(buffers);
+
+    // Compute multipart ETag: MD5 of concatenated per-part MD5 digests, then "-N"
+    const partMd5Buffers: Buffer[] = [];
+    for (const part of sortedParts) {
+      const storedPart = upload.parts.get(part.PartNumber)!;
+      const h = new Bun.CryptoHasher("md5");
+      h.update(storedPart.data);
+      partMd5Buffers.push(Buffer.from(h.digest()));
+    }
+    const combinedMd5 = Buffer.concat(partMd5Buffers);
+    const finalHasher = new Bun.CryptoHasher("md5");
+    finalHasher.update(combinedMd5);
+    const multipartEtag = `"${finalHasher.digest("hex")}-${sortedParts.length}"`;
+
     this.multipartUploads.delete(uploadId);
-    return this.putObject(bucket, key, combinedData, upload.contentType, upload.metadata);
+
+    this.requireBucket(bucket);
+    const obj: S3Object = {
+      bucket,
+      key,
+      data: combinedData,
+      contentType: upload.contentType || "application/octet-stream",
+      contentLength: combinedData.length,
+      etag: multipartEtag,
+      lastModified: new Date().toUTCString(),
+      metadata: upload.metadata,
+      storageClass: "STANDARD",
+    };
+    this.objects.set(this.objectKey(bucket, key), obj);
+    return obj;
   }
 
   abortMultipartUpload(bucket: string, key: string, uploadId: string): void {

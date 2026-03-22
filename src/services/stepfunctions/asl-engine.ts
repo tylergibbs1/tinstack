@@ -406,7 +406,7 @@ export class AslEngine {
     if (rule.IsBoolean !== undefined) return rule.IsBoolean ? typeof value === "boolean" : typeof value !== "boolean";
     if (rule.StringMatches !== undefined) {
       if (typeof value !== "string") return false;
-      const regex = new RegExp("^" + rule.StringMatches.replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
+      const regex = new RegExp("^" + rule.StringMatches.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\?/g, "\\?").replace(/\*/g, ".*") + "$");
       return regex.test(value);
     }
 

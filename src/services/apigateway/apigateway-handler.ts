@@ -39,20 +39,20 @@ export class ApiGatewayHandler {
         if (method === "POST") {
           const body = await req.json();
           const route = this.service.createRoute(apiId, body.routeKey ?? body.RouteKey, body.target ?? body.Target, body.authorizationType ?? body.AuthorizationType, ctx.region);
-          return this.json(routeToJson(route), ctx, 201);
+          return this.json(routeToJson(route, apiId), ctx, 201);
         }
         if (method === "GET") {
-          return this.json({ items: this.service.getRoutes(apiId, ctx.region).map(routeToJson) }, ctx);
+          return this.json({ items: this.service.getRoutes(apiId, ctx.region).map(r => routeToJson(r, apiId)) }, ctx);
         }
       }
 
       const routeMatch = path.match(/^\/v2\/apis\/([^/]+)\/routes\/([^/]+)$/);
       if (routeMatch) {
         const [, apiId, routeId] = routeMatch;
-        if (method === "GET") return this.json(routeToJson(this.service.getRoute(apiId, routeId, ctx.region)), ctx);
+        if (method === "GET") return this.json(routeToJson(this.service.getRoute(apiId, routeId, ctx.region), apiId), ctx);
         if (method === "PATCH") {
           const body = await req.json();
-          return this.json(routeToJson(this.service.updateRoute(apiId, routeId, body.target ?? body.Target, ctx.region)), ctx);
+          return this.json(routeToJson(this.service.updateRoute(apiId, routeId, body.target ?? body.Target, ctx.region), apiId), ctx);
         }
         if (method === "DELETE") { this.service.deleteRoute(apiId, routeId, ctx.region); return this.empty(ctx); }
       }
@@ -64,17 +64,17 @@ export class ApiGatewayHandler {
         if (method === "POST") {
           const body = await req.json();
           const integration = this.service.createIntegration(apiId, body.integrationType ?? body.IntegrationType, body.integrationUri ?? body.IntegrationUri, body.integrationMethod ?? body.IntegrationMethod, body.payloadFormatVersion ?? body.PayloadFormatVersion, ctx.region);
-          return this.json(integrationToJson(integration), ctx, 201);
+          return this.json(integrationToJson(integration, apiId), ctx, 201);
         }
         if (method === "GET") {
-          return this.json({ items: this.service.getIntegrations(apiId, ctx.region).map(integrationToJson) }, ctx);
+          return this.json({ items: this.service.getIntegrations(apiId, ctx.region).map(i => integrationToJson(i, apiId)) }, ctx);
         }
       }
 
       const integrationMatch = path.match(/^\/v2\/apis\/([^/]+)\/integrations\/([^/]+)$/);
       if (integrationMatch) {
         const [, apiId, integrationId] = integrationMatch;
-        if (method === "GET") return this.json(integrationToJson(this.service.getIntegration(apiId, integrationId, ctx.region)), ctx);
+        if (method === "GET") return this.json(integrationToJson(this.service.getIntegration(apiId, integrationId, ctx.region), apiId), ctx);
         if (method === "DELETE") { this.service.deleteIntegration(apiId, integrationId, ctx.region); return this.empty(ctx); }
       }
 
@@ -85,17 +85,18 @@ export class ApiGatewayHandler {
         if (method === "POST") {
           const body = await req.json();
           const stage = this.service.createStage(apiId, body.stageName ?? body.StageName, body.description ?? body.Description, body.autoDeploy ?? body.AutoDeploy ?? false, ctx.region);
-          return this.json(stageToJson(stage), ctx, 201);
+          return this.json(stageToJson(stage, apiId), ctx, 201);
         }
         if (method === "GET") {
-          return this.json({ items: this.service.getStages(apiId, ctx.region).map(stageToJson) }, ctx);
+          return this.json({ items: this.service.getStages(apiId, ctx.region).map(s => stageToJson(s, apiId)) }, ctx);
         }
       }
 
-      const stageMatch = path.match(/^\/v2\/apis\/([^/]+)\/stages\/([^/]+)$/);
+      const stageMatch = path.match(/^\/v2\/apis\/([^/]+)\/stages\/(.+)$/);
       if (stageMatch) {
-        const [, apiId, stageName] = stageMatch;
-        if (method === "GET") return this.json(stageToJson(this.service.getStage(apiId, stageName, ctx.region)), ctx);
+        const [, apiId, rawStageName] = stageMatch;
+        const stageName = decodeURIComponent(rawStageName);
+        if (method === "GET") return this.json(stageToJson(this.service.getStage(apiId, stageName, ctx.region), apiId), ctx);
         if (method === "DELETE") { this.service.deleteStage(apiId, stageName, ctx.region); return this.empty(ctx); }
       }
 
@@ -126,18 +127,18 @@ function apiToJson(a: any) {
   };
 }
 
-function routeToJson(r: any) {
-  return { routeId: r.routeId, routeKey: r.routeKey, target: r.target, authorizationType: r.authorizationType };
+function routeToJson(r: any, apiId: string) {
+  return { apiId, routeId: r.routeId, routeKey: r.routeKey, target: r.target, authorizationType: r.authorizationType };
 }
 
-function integrationToJson(i: any) {
+function integrationToJson(i: any, apiId: string) {
   return {
-    integrationId: i.integrationId, integrationType: i.integrationType,
+    apiId, integrationId: i.integrationId, integrationType: i.integrationType,
     integrationUri: i.integrationUri, integrationMethod: i.integrationMethod,
     payloadFormatVersion: i.payloadFormatVersion,
   };
 }
 
-function stageToJson(s: any) {
-  return { stageName: s.stageName, description: s.description, autoDeploy: s.autoDeploy, createdDate: s.createdDate };
+function stageToJson(s: any, apiId: string) {
+  return { apiId, stageName: s.stageName, description: s.description, autoDeploy: s.autoDeploy, createdDate: s.createdDate };
 }

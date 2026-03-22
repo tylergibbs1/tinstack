@@ -104,27 +104,29 @@ export class KmsService {
       });
   }
 
+  listResourceTags(keyId: string, region: string): { TagKey: string; TagValue: string }[] {
+    const key = this.findKey(keyId, region);
+    return Object.entries(key.tags).map(([TagKey, TagValue]) => ({ TagKey, TagValue }));
+  }
+
   encrypt(keyId: string, plaintext: string, region: string): { ciphertextBlob: string; keyId: string } {
     const key = this.findKey(keyId, region);
     if (!key.enabled) throw new AwsError("DisabledException", "Key is disabled", 400);
-    // Simple "encryption" — base64 encode with a prefix for the key
-    const marker = Buffer.from(`tinstack:${key.keyId}:`).toString("base64");
-    const ciphertext = marker + plaintext;
-    return { ciphertextBlob: Buffer.from(ciphertext).toString("base64"), keyId: key.keyId };
+    // Simple "encryption" — prefix with a fixed-format marker, then base64 the whole thing
+    const ciphertext = `TINSTACK_KMS:${key.keyId}:${plaintext}`;
+    return { ciphertextBlob: Buffer.from(ciphertext).toString("base64"), keyId: key.arn };
   }
 
   decrypt(ciphertextBlob: string, region: string): { plaintext: string; keyId: string } {
     const decoded = Buffer.from(ciphertextBlob, "base64").toString();
-    const markerPrefix = "tinstack:";
-    const decodedMarker = Buffer.from(decoded.substring(0, 60), "base64").toString();
 
-    if (decodedMarker.startsWith(markerPrefix)) {
-      const parts = decodedMarker.split(":");
-      const keyId = parts[1];
+    if (decoded.startsWith("TINSTACK_KMS:")) {
+      const firstColon = decoded.indexOf(":", 13); // after "TINSTACK_KMS:"
+      if (firstColon === -1) throw new AwsError("InvalidCiphertextException", "The ciphertext is invalid.", 400);
+      const keyId = decoded.substring(13, firstColon);
+      const plaintext = decoded.substring(firstColon + 1);
       const key = this.findKey(keyId, region);
-      const markerLen = Buffer.from(`tinstack:${keyId}:`).toString("base64").length;
-      const plaintext = decoded.substring(markerLen);
-      return { plaintext, keyId: key.keyId };
+      return { plaintext, keyId: key.arn };
     }
 
     throw new AwsError("InvalidCiphertextException", "The ciphertext is invalid.", 400);
@@ -137,7 +139,7 @@ export class KmsService {
     crypto.getRandomValues(plaintextBytes);
     const plaintext = Buffer.from(plaintextBytes).toString("base64");
     const encrypted = this.encrypt(keyId, plaintext, region);
-    return { ciphertextBlob: encrypted.ciphertextBlob, plaintext, keyId: key.keyId };
+    return { ciphertextBlob: encrypted.ciphertextBlob, plaintext, keyId: key.arn };
   }
 
   private findKey(keyId: string, region: string): KmsKey {

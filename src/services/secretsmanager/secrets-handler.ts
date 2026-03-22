@@ -32,6 +32,8 @@ export class SecretsManagerHandler {
           return this.untagResource(body, ctx);
         case "GetRandomPassword":
           return this.getRandomPassword(body, ctx);
+        case "GetResourcePolicy":
+          return this.getResourcePolicy(body, ctx);
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }
@@ -52,7 +54,7 @@ export class SecretsManagerHandler {
     if (body.Tags) for (const t of body.Tags) tags[t.Key] = t.Value;
     const secret = this.service.createSecret(
       body.Name, body.SecretString, body.SecretBinary,
-      body.Description, body.KmsKeyId, tags, ctx.region,
+      body.Description, body.KmsKeyId, tags, ctx.region, body.ClientRequestToken,
     );
     return this.json({
       ARN: secret.arn,
@@ -89,7 +91,7 @@ export class SecretsManagerHandler {
 
   private putSecretValue(body: any, ctx: RequestContext): Response {
     const { secret, versionId } = this.service.putSecretValue(
-      body.SecretId, body.SecretString, body.SecretBinary, body.VersionStages, ctx.region,
+      body.SecretId, body.SecretString, body.SecretBinary, body.VersionStages, ctx.region, body.ClientRequestToken,
     );
     return this.json({
       ARN: secret.arn,
@@ -177,6 +179,11 @@ export class SecretsManagerHandler {
   private untagResource(body: any, ctx: RequestContext): Response {
     this.service.untagResource(body.SecretId, body.TagKeys ?? [], ctx.region);
     return this.json({}, ctx);
+  }
+
+  private getResourcePolicy(body: any, ctx: RequestContext): Response {
+    const secret = this.service.describeSecret(body.SecretId, ctx.region);
+    return this.json({ ARN: secret.arn, Name: secret.name, ResourcePolicy: null }, ctx);
   }
 
   private getRandomPassword(body: any, ctx: RequestContext): Response {

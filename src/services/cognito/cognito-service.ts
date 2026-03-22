@@ -71,6 +71,8 @@ export class CognitoService {
   private clients: StorageBackend<string, UserPoolClient>;
   private users: StorageBackend<string, CognitoUser>;
   private poolCounter = 0;
+  private clientIdToPoolId: Map<string, string> = new Map();
+  private refreshTokenToUsername: Map<string, { username: string; userPoolId: string }> = new Map();
 
   constructor(private accountId: string) {
     this.pools = new InMemoryStorage();
@@ -144,6 +146,7 @@ export class CognitoService {
       lastModifiedDate: now,
     };
     this.clients.set(`${userPoolId}#${clientId}`, client);
+    this.clientIdToPoolId.set(clientId, userPoolId);
     return client;
   }
 
@@ -153,8 +156,15 @@ export class CognitoService {
     return client;
   }
 
+  resolvePoolIdFromClientId(clientId: string): string {
+    const poolId = this.clientIdToPoolId.get(clientId);
+    if (!poolId) throw new AwsError("ResourceNotFoundException", `Client ${clientId} not found.`, 400);
+    return poolId;
+  }
+
   deleteUserPoolClient(userPoolId: string, clientId: string, region: string): void {
     this.clients.delete(`${userPoolId}#${clientId}`);
+    this.clientIdToPoolId.delete(clientId);
   }
 
   listUserPoolClients(userPoolId: string, region: string): UserPoolClient[] {
@@ -259,7 +269,7 @@ export class CognitoService {
       const password = authParameters.PASSWORD;
       const user = this.getUser(userPoolId, username);
 
-      if (!user.enabled) throw new AwsError("UserNotConfirmedException", "User is disabled.", 400);
+      if (!user.enabled) throw new AwsError("NotAuthorizedException", "User is disabled.", 400);
       if (user.password !== password) throw new AwsError("NotAuthorizedException", "Incorrect username or password.", 400);
       if (!user.confirmed) throw new AwsError("UserNotConfirmedException", "User is not confirmed.", 400);
 
@@ -267,16 +277,27 @@ export class CognitoService {
     }
 
     if (authFlow === "REFRESH_TOKEN_AUTH" || authFlow === "REFRESH_TOKEN") {
-      // Just generate new tokens
-      const sub = crypto.randomUUID();
+      const refreshToken = authParameters.REFRESH_TOKEN;
+      const tokenInfo = this.refreshTokenToUsername.get(refreshToken);
+      let sub: string;
+      let username: string;
+      let email: string | undefined;
+      if (tokenInfo) {
+        const user = this.getUser(tokenInfo.userPoolId, tokenInfo.username);
+        sub = user.attributes.sub ?? crypto.randomUUID();
+        username = user.username;
+        email = user.attributes.email;
+      } else {
+        sub = crypto.randomUUID();
+        username = "unknown";
+      }
       return {
         AuthenticationResult: {
-          AccessToken: this.generateJwt({ sub, token_use: "access", client_id: clientId }, region, userPoolId),
-          IdToken: this.generateJwt({ sub, token_use: "id", email: "refreshed@example.com" }, region, userPoolId),
-          RefreshToken: "",
+          AccessToken: this.generateJwt({ sub, username, token_use: "access", client_id: clientId }, region, userPoolId),
+          IdToken: this.generateJwt({ sub, username, token_use: "id", email }, region, userPoolId),
           ExpiresIn: 3600,
           TokenType: "Bearer",
-        },
+        } as any,
       };
     }
 
@@ -292,10 +313,12 @@ export class CognitoService {
 
   private generateTokens(user: CognitoUser, userPoolId: string, clientId: string, region: string): AuthResult {
     const sub = user.attributes.sub ?? crypto.randomUUID();
+    const refreshToken = Buffer.from(crypto.randomUUID()).toString("base64");
+    this.refreshTokenToUsername.set(refreshToken, { username: user.username, userPoolId });
     return {
       AccessToken: this.generateJwt({ sub, username: user.username, token_use: "access", client_id: clientId }, region, userPoolId),
       IdToken: this.generateJwt({ sub, username: user.username, token_use: "id", email: user.attributes.email, ...user.attributes }, region, userPoolId),
-      RefreshToken: Buffer.from(crypto.randomUUID()).toString("base64"),
+      RefreshToken: refreshToken,
       ExpiresIn: 3600,
       TokenType: "Bearer",
     };

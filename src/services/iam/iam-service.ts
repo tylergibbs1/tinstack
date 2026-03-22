@@ -153,6 +153,38 @@ export class IamService {
     return policy;
   }
 
+  getPolicy(policyArn: string): IamPolicy {
+    const policy = this.policies.get(policyArn);
+    if (!policy) throw new AwsError("NoSuchEntity", `Policy ${policyArn} not found.`, 404);
+    return policy;
+  }
+
+  getPolicyVersion(policyArn: string, versionId: string): { document: string; versionId: string; isDefaultVersion: boolean; createDate: string } {
+    const policy = this.getPolicy(policyArn);
+    if (versionId !== policy.defaultVersionId) {
+      throw new AwsError("NoSuchEntity", `Policy version ${versionId} not found.`, 404);
+    }
+    return {
+      document: policy.document,
+      versionId: policy.defaultVersionId,
+      isDefaultVersion: true,
+      createDate: policy.createDate,
+    };
+  }
+
+  listRolePolicies(roleName: string): string[] {
+    const role = this.getRole(roleName);
+    return Object.keys(role.inlinePolicies);
+  }
+
+  listAttachedRolePolicies(roleName: string): { policyName: string; policyArn: string }[] {
+    const role = this.getRole(roleName);
+    return role.attachedPolicies.map((arn) => {
+      const policy = this.policies.get(arn);
+      return { policyName: policy?.policyName ?? arn.split("/").pop()!, policyArn: arn };
+    });
+  }
+
   deletePolicy(policyArn: string): void {
     if (!this.policies.has(policyArn)) throw new AwsError("NoSuchEntity", `Policy ${policyArn} not found.`, 404);
     this.policies.delete(policyArn);

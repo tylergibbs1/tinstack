@@ -17,6 +17,7 @@ export interface TableDefinition {
   tableSizeBytes: number;
   streamSpecification?: { StreamEnabled: boolean; StreamViewType?: string };
   ttlSpecification?: { AttributeName: string; Enabled: boolean };
+  tags: Record<string, string>;
 }
 
 export interface KeySchemaElement {
@@ -90,7 +91,12 @@ export class DynamoDbService {
       itemCount: 0,
       tableSizeBytes: 0,
       streamSpecification: request.StreamSpecification,
+      tags: {},
     };
+
+    if (request.Tags) {
+      for (const t of request.Tags) table.tags[t.Key] = t.Value;
+    }
 
     if (request.GlobalSecondaryIndexes) {
       table.globalSecondaryIndexes = request.GlobalSecondaryIndexes.map((gsi: any) => ({
@@ -217,8 +223,26 @@ export class DynamoDbService {
     switch (returnValues) {
       case "ALL_OLD": return oldItem;
       case "ALL_NEW": return item;
-      case "UPDATED_OLD": return oldItem;
-      case "UPDATED_NEW": return item;
+      case "UPDATED_OLD": {
+        if (!oldItem) return undefined;
+        const modified: Item = {};
+        for (const attr of Object.keys(item)) {
+          if (attr in oldItem && JSON.stringify(oldItem[attr]) !== JSON.stringify(item[attr])) {
+            modified[attr] = oldItem[attr];
+          }
+        }
+        return modified;
+      }
+      case "UPDATED_NEW": {
+        if (!oldItem) return { ...item };
+        const modified: Item = {};
+        for (const attr of Object.keys(item)) {
+          if (!(attr in oldItem) || JSON.stringify(oldItem[attr]) !== JSON.stringify(item[attr])) {
+            modified[attr] = item[attr];
+          }
+        }
+        return modified;
+      }
       default: return undefined;
     }
   }
@@ -246,16 +270,30 @@ export class DynamoDbService {
       allItems = this.applyKeyCondition(allItems, params.KeyConditionExpression, params.ExpressionAttributeNames, params.ExpressionAttributeValues, hashKeyName, rangeKeyName);
     }
 
-    const scannedCount = allItems.length;
-
-    if (params.FilterExpression) {
-      allItems = allItems.filter((item) => this.evaluateFilterExpression(item, params.FilterExpression, params.ExpressionAttributeNames, params.ExpressionAttributeValues));
+    // Sort by range key (ascending by default, descending if ScanIndexForward is false)
+    if (rangeKeyName) {
+      allItems.sort((a, b) => this.compareDynamoValues(a[rangeKeyName], b[rangeKeyName]));
+      if (params.ScanIndexForward === false) {
+        allItems.reverse();
+      }
     }
 
-    if (params.ScanIndexForward === false && rangeKeyName) {
-      allItems.reverse();
+    // Skip items up to and including the ExclusiveStartKey
+    if (params.ExclusiveStartKey) {
+      const startIdx = allItems.findIndex((item) => {
+        return keySchema.every((ks) => {
+          const itemVal = this.extractScalarValue(item[ks.AttributeName]);
+          const startVal = this.extractScalarValue(params.ExclusiveStartKey[ks.AttributeName]);
+          return itemVal === startVal;
+        });
+      });
+      if (startIdx >= 0) {
+        allItems = allItems.slice(startIdx + 1);
+      }
     }
 
+    // Apply Limit before FilterExpression (AWS behavior: Limit controls items evaluated)
+    let scannedCount: number;
     let lastEvaluatedKey: Item | undefined;
     if (params.Limit && allItems.length > params.Limit) {
       allItems = allItems.slice(0, params.Limit);
@@ -264,6 +302,11 @@ export class DynamoDbService {
       for (const ks of keySchema) {
         lastEvaluatedKey[ks.AttributeName] = lastItem[ks.AttributeName];
       }
+    }
+    scannedCount = allItems.length;
+
+    if (params.FilterExpression) {
+      allItems = allItems.filter((item) => this.evaluateFilterExpression(item, params.FilterExpression, params.ExpressionAttributeNames, params.ExpressionAttributeValues));
     }
 
     if (params.ProjectionExpression) {
@@ -278,12 +321,22 @@ export class DynamoDbService {
     const table = this.getTable(key);
     const itemMap = this.items.get(key)!;
     let allItems = [...itemMap.values()];
-    const scannedCount = allItems.length;
 
-    if (params.FilterExpression) {
-      allItems = allItems.filter((item) => this.evaluateFilterExpression(item, params.FilterExpression, params.ExpressionAttributeNames, params.ExpressionAttributeValues));
+    // Skip items up to and including the ExclusiveStartKey
+    if (params.ExclusiveStartKey) {
+      const startIdx = allItems.findIndex((item) => {
+        return table.keySchema.every((ks) => {
+          const itemVal = this.extractScalarValue(item[ks.AttributeName]);
+          const startVal = this.extractScalarValue(params.ExclusiveStartKey[ks.AttributeName]);
+          return itemVal === startVal;
+        });
+      });
+      if (startIdx >= 0) {
+        allItems = allItems.slice(startIdx + 1);
+      }
     }
 
+    // Apply Limit before FilterExpression (AWS behavior: Limit controls items evaluated)
     let lastEvaluatedKey: Item | undefined;
     if (params.Limit && allItems.length > params.Limit) {
       allItems = allItems.slice(0, params.Limit);
@@ -292,6 +345,11 @@ export class DynamoDbService {
       for (const ks of table.keySchema) {
         lastEvaluatedKey[ks.AttributeName] = lastItem[ks.AttributeName];
       }
+    }
+    const scannedCount = allItems.length;
+
+    if (params.FilterExpression) {
+      allItems = allItems.filter((item) => this.evaluateFilterExpression(item, params.FilterExpression, params.ExpressionAttributeNames, params.ExpressionAttributeValues));
     }
 
     if (params.ProjectionExpression) {
@@ -302,6 +360,14 @@ export class DynamoDbService {
   }
 
   batchWriteItem(requestItems: Record<string, any[]>, region: string): Record<string, any[]> {
+    let totalOps = 0;
+    for (const requests of Object.values(requestItems)) {
+      totalOps += requests.length;
+    }
+    if (totalOps > 25) {
+      throw new AwsError("ValidationException", "Too many items requested for the BatchWriteItem call", 400);
+    }
+
     const unprocessed: Record<string, any[]> = {};
     for (const [tableName, requests] of Object.entries(requestItems)) {
       for (const request of requests) {
@@ -316,6 +382,14 @@ export class DynamoDbService {
   }
 
   batchGetItem(requestItems: Record<string, any>, region: string): { responses: Record<string, Item[]>; unprocessedKeys: Record<string, any> } {
+    let totalKeys = 0;
+    for (const request of Object.values(requestItems)) {
+      totalKeys += (request as any).Keys.length;
+    }
+    if (totalKeys > 100) {
+      throw new AwsError("ValidationException", "Too many items requested for the BatchGetItem call", 400);
+    }
+
     const responses: Record<string, Item[]> = {};
     for (const [tableName, request] of Object.entries(requestItems)) {
       responses[tableName] = [];
@@ -375,6 +449,28 @@ export class DynamoDbService {
     const key = this.regionKey(region, tableName);
     const table = this.getTable(key);
     table.ttlSpecification = spec;
+  }
+
+  listTagsOfResource(resourceArn: string, region: string): { Key: string; Value: string }[] {
+    const table = this.findTableByArn(resourceArn, region);
+    return Object.entries(table.tags).map(([Key, Value]) => ({ Key, Value }));
+  }
+
+  tagResource(resourceArn: string, tags: { Key: string; Value: string }[], region: string): void {
+    const table = this.findTableByArn(resourceArn, region);
+    for (const t of tags) table.tags[t.Key] = t.Value;
+  }
+
+  untagResource(resourceArn: string, tagKeys: string[], region: string): void {
+    const table = this.findTableByArn(resourceArn, region);
+    for (const key of tagKeys) delete table.tags[key];
+  }
+
+  private findTableByArn(resourceArn: string, region: string): TableDefinition {
+    for (const table of this.tables.values()) {
+      if (table.tableArn === resourceArn) return table;
+    }
+    throw new AwsError("ResourceNotFoundException", `Requested resource not found`, 400);
   }
 
   // --- Internal helpers ---

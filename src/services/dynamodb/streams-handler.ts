@@ -19,6 +19,8 @@ export class DynamoDbStreamsHandler {
               StreamArn: stream.streamArn, StreamLabel: stream.streamLabel,
               StreamStatus: stream.streamStatus, StreamViewType: stream.streamViewType,
               TableName: stream.tableName,
+              CreationRequestDateTime: stream.creationRequestDateTime,
+              KeySchema: stream.keySchema,
               Shards: stream.shards.map((s) => ({
                 ShardId: s.shardId, ParentShardId: s.parentShardId,
                 SequenceNumberRange: s.sequenceNumberRange,

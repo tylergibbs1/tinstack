@@ -101,6 +101,18 @@ export class StepFunctionsService {
     const name = executionName ?? `exec-${++this.executionCounter}-${Date.now()}`;
     const executionArn = `${stateMachineArn}:${name}`;
 
+    // Check for existing execution with the same name
+    if (executionName) {
+      const existing = this.executions.get(executionArn);
+      if (existing) {
+        if (existing.input !== input) {
+          throw new AwsError("ExecutionAlreadyExists", `Execution already exists for name '${executionName}' with different input.`, 409);
+        }
+        // Idempotent: same name and same input, return existing
+        return existing;
+      }
+    }
+
     const execution: Execution = {
       executionArn,
       stateMachineArn,

@@ -59,7 +59,7 @@ export class StsQueryHandler {
   }
 
   private getSessionToken(params: URLSearchParams, ctx: RequestContext): Response {
-    const creds = this.service.getSessionToken(parseInt(params.get("DurationSeconds") ?? "43200"));
+    const creds = this.service.getSessionToken(parseInt(params.get("DurationSeconds") ?? "3600"));
     const result = new XmlBuilder()
       .start("Credentials")
         .elem("AccessKeyId", creds.accessKeyId)

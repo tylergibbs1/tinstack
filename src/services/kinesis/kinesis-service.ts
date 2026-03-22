@@ -10,6 +10,7 @@ export interface KinesisStream {
   retentionPeriodHours: number;
   createdTimestamp: number;
   shards: KinesisShard[];
+  tags: Record<string, string>;
 }
 
 export interface KinesisShard {
@@ -63,6 +64,7 @@ export class KinesisService {
       retentionPeriodHours: 24,
       createdTimestamp: Date.now() / 1000,
       shards,
+      tags: {},
     });
   }
 
@@ -105,7 +107,7 @@ export class KinesisService {
     return { failedRecordCount: 0, records: results };
   }
 
-  getShardIterator(streamName: string, shardId: string, iteratorType: string, startingSequenceNumber: string | undefined, region: string): string {
+  getShardIterator(streamName: string, shardId: string, iteratorType: string, startingSequenceNumber: string | undefined, region: string, timestamp?: number): string {
     const key = this.regionKey(region, streamName);
     const stream = this.streams.get(key);
     if (!stream) throw new AwsError("ResourceNotFoundException", `Stream ${streamName} not found.`, 400);
@@ -118,6 +120,9 @@ export class KinesisService {
       position = shard.records.findIndex((r) => r.sequenceNumber === startingSequenceNumber) + 1;
     } else if (iteratorType === "AT_SEQUENCE_NUMBER" && startingSequenceNumber) {
       position = shard.records.findIndex((r) => r.sequenceNumber === startingSequenceNumber);
+    } else if (iteratorType === "AT_TIMESTAMP" && timestamp != null) {
+      const idx = shard.records.findIndex((r) => r.timestamp >= timestamp);
+      position = idx >= 0 ? idx : shard.records.length;
     } else if (iteratorType === "LATEST") {
       position = shard.records.length;
     }
@@ -150,6 +155,37 @@ export class KinesisService {
       nextShardIterator: nextIteratorId,
       millisBehindLatest: shard.records.length > newPosition ? (Date.now() - shard.records[newPosition].timestamp * 1000) : 0,
     };
+  }
+
+  describeStreamSummary(streamName: string, region: string): {
+    StreamName: string; StreamARN: string; StreamStatus: string;
+    RetentionPeriodHours: number; StreamCreationTimestamp: number;
+    OpenShardCount: number; ConsumerCount: number; StreamModeDetails: { StreamMode: string };
+  } {
+    const stream = this.describeStream(streamName, region);
+    return {
+      StreamName: stream.streamName,
+      StreamARN: stream.streamArn,
+      StreamStatus: stream.streamStatus,
+      RetentionPeriodHours: stream.retentionPeriodHours,
+      StreamCreationTimestamp: stream.createdTimestamp,
+      OpenShardCount: stream.shardCount,
+      ConsumerCount: 0,
+      StreamModeDetails: { StreamMode: "PROVISIONED" },
+    };
+  }
+
+  listTagsForStream(streamName: string, region: string): { Tags: { Key: string; Value: string }[]; HasMoreTags: boolean } {
+    const stream = this.describeStream(streamName, region);
+    return {
+      Tags: Object.entries(stream.tags).map(([Key, Value]) => ({ Key, Value })),
+      HasMoreTags: false,
+    };
+  }
+
+  addTagsToStream(streamName: string, tags: Record<string, string>, region: string): void {
+    const stream = this.describeStream(streamName, region);
+    Object.assign(stream.tags, tags);
   }
 
   private simpleHash(s: string): number {

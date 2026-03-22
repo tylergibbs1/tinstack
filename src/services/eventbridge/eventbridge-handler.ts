@@ -19,7 +19,8 @@ export class EventBridgeHandler {
           return this.json({ Name: bus.name, Arn: bus.arn, State: bus.state }, ctx);
         }
         case "PutRule": {
-          const rule = this.service.putRule(body.Name, body.EventBusName, body.EventPattern, body.ScheduleExpression, body.State, body.Description, ctx.region);
+          const tags: Record<string, string> | undefined = body.Tags ? Object.fromEntries(body.Tags.map((t: any) => [t.Key, t.Value])) : undefined;
+          const rule = this.service.putRule(body.Name, body.EventBusName, body.EventPattern, body.ScheduleExpression, body.State, body.Description, ctx.region, tags);
           return this.json({ RuleArn: rule.arn }, ctx);
         }
         case "DeleteRule": this.service.deleteRule(body.Name, body.EventBusName, ctx.region); return this.json({}, ctx);
@@ -38,6 +39,9 @@ export class EventBridgeHandler {
           const r = this.service.putEvents(body.Entries, ctx.region);
           return this.json({ FailedEntryCount: r.failedEntryCount, Entries: r.entries.map((e) => ({ EventId: e.eventId })) }, ctx);
         }
+        case "ListTagsForResource": return this.json({ Tags: this.service.listTagsForResource(body.ResourceARN) }, ctx);
+        case "TagResource": this.service.tagResource(body.ResourceARN, body.Tags); return this.json({}, ctx);
+        case "UntagResource": this.service.untagResource(body.ResourceARN, body.TagKeys); return this.json({}, ctx);
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }

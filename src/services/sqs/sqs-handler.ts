@@ -108,6 +108,7 @@ export class SqsJsonHandler {
         MD5OfBody: m.md5OfBody,
         Body: m.body,
         Attributes: {
+          SenderId: "AIDAAAAAAAAAAAAAAAAAA",
           SentTimestamp: String(m.sentTimestamp),
           ApproximateReceiveCount: String(m.receiveCount),
           ApproximateFirstReceiveTimestamp: String(m.firstReceiveTimestamp ?? ""),

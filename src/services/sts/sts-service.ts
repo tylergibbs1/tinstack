@@ -52,7 +52,7 @@ export class StsService {
       accessKeyId: `ASIA${sessionId.toUpperCase()}`,
       secretAccessKey: crypto.randomUUID(),
       sessionToken: `FwoGZXIv${Buffer.from(crypto.randomUUID()).toString("base64")}`,
-      expiration: new Date(Date.now() + (durationSeconds || 43200) * 1000).toISOString(),
+      expiration: new Date(Date.now() + (durationSeconds || 3600) * 1000).toISOString(),
     };
   }
 }

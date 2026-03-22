@@ -26,6 +26,8 @@ export interface StreamDescription {
   streamViewType: string;
   tableName: string;
   shards: StreamShard[];
+  creationRequestDateTime: number;
+  keySchema?: { AttributeName: string; KeyType: string }[];
 }
 
 export interface StreamShard {
@@ -44,7 +46,7 @@ export class DynamoDbStreamsService {
     this.streams = new InMemoryStorage();
   }
 
-  createStream(tableName: string, streamViewType: string, region: string): string {
+  createStream(tableName: string, streamViewType: string, region: string, keySchema?: { AttributeName: string; KeyType: string }[]): string {
     const label = new Date().toISOString().replace(/[:.]/g, "");
     const streamArn = buildArn("dynamodb", region, this.accountId, "table/", `${tableName}/stream/${label}`);
 
@@ -59,6 +61,8 @@ export class DynamoDbStreamsService {
         sequenceNumberRange: { StartingSequenceNumber: "1" },
         records: [],
       }],
+      creationRequestDateTime: Date.now() / 1000,
+      keySchema,
     };
     this.streams.set(streamArn, stream);
     return streamArn;

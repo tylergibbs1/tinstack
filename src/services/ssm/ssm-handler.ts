@@ -82,7 +82,7 @@ export class SsmHandler {
   }
 
   private getParametersByPath(body: any, ctx: RequestContext): Response {
-    const result = this.service.getParametersByPath(body.Path, body.Recursive ?? false, ctx.region, body.MaxResults);
+    const result = this.service.getParametersByPath(body.Path, body.Recursive ?? false, ctx.region, body.MaxResults, body.NextToken);
     return this.json({
       Parameters: result.parameters.map((p) => ({
         Name: p.name, Type: p.type, Value: p.value, Version: p.version,
@@ -106,7 +106,7 @@ export class SsmHandler {
   }
 
   private describeParameters(body: any, ctx: RequestContext): Response {
-    const result = this.service.describeParameters(ctx.region, body.ParameterFilters, body.MaxResults);
+    const result = this.service.describeParameters(ctx.region, body.ParameterFilters, body.MaxResults, body.NextToken);
     return this.json({
       Parameters: result.parameters,
       NextToken: result.nextToken,

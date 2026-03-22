@@ -25,9 +25,16 @@ export class StepFunctionsHandler {
           this.service.tagResource(body.resourceArn, tags);
           return this.json({}, ctx);
         }
+        case "ValidateStateMachineDefinition": {
+          // Terraform calls this during plan - just return valid
+          return this.json({ result: "OK", diagnostics: [] }, ctx);
+        }
         case "ListTagsForResource": {
           const tags = this.service.listTagsForResource(body.resourceArn);
           return this.json({ tags: Object.entries(tags).map(([key, value]) => ({ key, value })) }, ctx);
+        }
+        case "ListStateMachineVersions": {
+          return this.json({ stateMachineVersions: [] }, ctx);
         }
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
@@ -73,7 +80,7 @@ export class StepFunctionsHandler {
 
   private updateStateMachine(body: any, ctx: RequestContext): Response {
     const sm = this.service.updateStateMachine(body.stateMachineArn, body.definition, body.roleArn, ctx.region);
-    return this.json({ updateDate: Date.now() / 1000 }, ctx);
+    return this.json({ stateMachineArn: sm.stateMachineArn, updateDate: Date.now() / 1000 }, ctx);
   }
 
   private async startExecution(body: any, ctx: RequestContext): Promise<Response> {

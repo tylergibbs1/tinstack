@@ -86,10 +86,10 @@ export class QueryRouter {
     const sqsActions = ["CreateQueue", "DeleteQueue", "SendMessage", "ReceiveMessage", "DeleteMessage", "GetQueueUrl", "GetQueueAttributes", "SetQueueAttributes", "ListQueues", "PurgeQueue", "ChangeMessageVisibility", "SendMessageBatch", "DeleteMessageBatch", "TagQueue", "UntagQueue", "ListQueueTags"];
     if (sqsActions.includes(action)) return "sqs";
 
-    const snsActions = ["CreateTopic", "DeleteTopic", "Publish", "Subscribe", "Unsubscribe", "ListTopics", "ListSubscriptions"];
+    const snsActions = ["CreateTopic", "DeleteTopic", "Publish", "Subscribe", "Unsubscribe", "ListTopics", "ListSubscriptions", "GetTopicAttributes", "SetTopicAttributes", "ListSubscriptionsByTopic", "ListTagsForResource", "TagResource", "UntagResource", "GetSubscriptionAttributes", "SetSubscriptionAttributes"];
     if (snsActions.includes(action)) return "sns";
 
-    const iamActions = ["CreateRole", "CreateUser", "CreatePolicy", "GetRole", "ListRoles", "ListUsers"];
+    const iamActions = ["CreateRole", "CreateUser", "CreatePolicy", "GetRole", "ListRoles", "ListUsers", "DeleteRole", "GetUser", "DeleteUser", "ListPolicies", "DeletePolicy", "AttachRolePolicy", "DetachRolePolicy", "PutRolePolicy", "DeleteRolePolicy", "CreateAccessKey", "ListAccessKeys", "DeleteAccessKey", "ListRolePolicies", "GetPolicy", "GetPolicyVersion", "ListAttachedRolePolicies", "ListPolicyVersions", "ListInstanceProfilesForRole"];
     if (iamActions.includes(action)) return "iam";
 
     const stsActions = ["GetCallerIdentity", "AssumeRole", "GetSessionToken"];

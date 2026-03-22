@@ -21,7 +21,11 @@ export class CognitoHandler {
         case "DeleteUserPoolClient": this.service.deleteUserPoolClient(body.UserPoolId, body.ClientId, ctx.region); return this.json({}, ctx);
         case "ListUserPoolClients": return this.json({ UserPoolClients: this.service.listUserPoolClients(body.UserPoolId, ctx.region).map(clientSummary) }, ctx);
         case "SignUp": return this.signUp(body, ctx);
-        case "ConfirmSignUp": this.service.confirmSignUp(body.UserPoolId ?? this.extractPoolId(body), body.Username, ctx.region); return this.json({}, ctx);
+        case "ConfirmSignUp": {
+          const poolId = body.UserPoolId ?? (body.ClientId ? this.service.resolvePoolIdFromClientId(body.ClientId) : this.extractPoolId(body));
+          this.service.confirmSignUp(poolId, body.Username, ctx.region);
+          return this.json({}, ctx);
+        }
         case "AdminCreateUser": return this.adminCreateUser(body, ctx);
         case "AdminGetUser": return this.adminGetUser(body, ctx);
         case "AdminDeleteUser": this.service.adminDeleteUser(body.UserPoolId, body.Username, ctx.region); return this.json({}, ctx);
@@ -63,7 +67,8 @@ export class CognitoHandler {
   }
 
   private signUp(body: any, ctx: RequestContext): Response {
-    const user = this.service.signUp(body.UserPoolId ?? this.extractPoolId(body), body.Username, body.Password, body.UserAttributes ?? [], ctx.region);
+    const poolId = body.UserPoolId ?? (body.ClientId ? this.service.resolvePoolIdFromClientId(body.ClientId) : this.extractPoolId(body));
+    const user = this.service.signUp(poolId, body.Username, body.Password, body.UserAttributes ?? [], ctx.region);
     return this.json({
       UserConfirmed: user.confirmed,
       UserSub: user.attributes.sub,
@@ -88,9 +93,11 @@ export class CognitoHandler {
   }
 
   private initiateAuth(body: any, ctx: RequestContext): Response {
+    const clientId = body.ClientId ?? body.AuthParameters?.CLIENT_ID;
+    const poolId = body.UserPoolId ?? (clientId ? this.service.resolvePoolIdFromClientId(clientId) : this.extractPoolId(body));
     const result = this.service.initiateAuth(
-      body.UserPoolId ?? this.extractPoolId(body),
-      body.ClientId ?? body.AuthParameters?.CLIENT_ID,
+      poolId,
+      clientId,
       body.AuthFlow,
       body.AuthParameters ?? {},
       ctx.region,

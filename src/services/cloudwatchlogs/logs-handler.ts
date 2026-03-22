@@ -39,7 +39,7 @@ export class CloudWatchLogsHandler {
           return this.json({ nextSequenceToken: result.nextSequenceToken }, ctx);
         }
         case "GetLogEvents": {
-          const result = this.service.getLogEvents(body.logGroupName, body.logStreamName, body.startTime, body.endTime, body.limit, ctx.region);
+          const result = this.service.getLogEvents(body.logGroupName, body.logStreamName, body.startTime, body.endTime, body.limit, body.nextToken, ctx.region);
           return this.json({
             events: result.events.map((e) => ({ timestamp: e.timestamp, message: e.message, ingestionTime: e.ingestionTime })),
             nextForwardToken: result.nextForwardToken, nextBackwardToken: result.nextBackwardToken,
@@ -50,6 +50,26 @@ export class CloudWatchLogsHandler {
         case "TagLogGroup":
           this.service.tagLogGroup(body.logGroupName, body.tags ?? {}, ctx.region);
           return this.json({}, ctx);
+        case "ListTagsForResource": {
+          // ARN-based tag API (newer). Extract log group name from ARN.
+          const arn = body.resourceArn ?? "";
+          const match = arn.match(/:log-group:([^:]+)/);
+          const groupName = match ? match[1] : "";
+          const tags = this.service.getLogGroupTags(groupName, ctx.region);
+          return this.json({ tags }, ctx);
+        }
+        case "TagResource": {
+          const arn = body.resourceArn ?? "";
+          const match = arn.match(/:log-group:([^:]+)/);
+          if (match) this.service.tagLogGroup(match[1], body.tags ?? {}, ctx.region);
+          return this.json({}, ctx);
+        }
+        case "UntagResource": {
+          const arn = body.resourceArn ?? "";
+          const match = arn.match(/:log-group:([^:]+)/);
+          if (match) this.service.untagLogGroup(match[1], body.tagKeys ?? [], ctx.region);
+          return this.json({}, ctx);
+        }
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }

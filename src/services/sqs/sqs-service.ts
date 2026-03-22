@@ -60,7 +60,17 @@ export class SqsService {
   createQueue(queueName: string, attributes: Record<string, string>, tags: Record<string, string>, region: string): SqsQueue {
     const key = this.regionKey(region, queueName);
     const existing = this.queues.get(key);
-    if (existing) return existing;
+    if (existing) {
+      // Validate that requested attributes match existing queue's attributes
+      if (attributes && Object.keys(attributes).length > 0) {
+        for (const [attrName, attrValue] of Object.entries(attributes)) {
+          if (existing.attributes[attrName] !== undefined && existing.attributes[attrName] !== attrValue) {
+            throw new AwsError("QueueNameExists", "A queue with this name already exists with different attributes.", 400);
+          }
+        }
+      }
+      return existing;
+    }
 
     const now = Date.now();
     const queue: SqsQueue = {
@@ -165,13 +175,18 @@ export class SqsService {
         dedupMap = new Map();
         this.dedupCache.set(dedupKey, dedupMap);
       }
+      // Prune expired entries (older than 5 minutes)
+      const now = Date.now();
+      for (const [id, ts] of dedupMap) {
+        if (now - ts >= 300_000) dedupMap.delete(id);
+      }
       const existing = dedupMap.get(messageDeduplicationId);
-      if (existing && Date.now() - existing < 300_000) {
+      if (existing && now - existing < 300_000) {
         const msgs = this.messages.get(key) ?? [];
         const found = msgs.find((m) => m.messageDeduplicationId === messageDeduplicationId);
         if (found) return found;
       }
-      dedupMap.set(messageDeduplicationId, Date.now());
+      dedupMap.set(messageDeduplicationId, now);
     }
 
     const delay = (delaySeconds ?? parseInt(queue.attributes.DelaySeconds ?? "0", 10)) * 1000;
@@ -271,14 +286,37 @@ export class SqsService {
 
   private hashMessageAttributes(attrs: Record<string, MessageAttributeValue>): string {
     if (!attrs || Object.keys(attrs).length === 0) return "";
-    const hasher = new Bun.CryptoHasher("md5");
     const sorted = Object.keys(attrs).sort();
-    for (const key of sorted) {
-      const attr = attrs[key];
-      hasher.update(key);
-      hasher.update(attr.DataType);
-      if (attr.StringValue) hasher.update(attr.StringValue);
+    const buffers: Buffer[] = [];
+    for (const name of sorted) {
+      const attr = attrs[name];
+      const nameBytes = Buffer.from(name, "utf-8");
+      const dataTypeBytes = Buffer.from(attr.DataType, "utf-8");
+
+      // 4-byte big-endian length of name + name bytes
+      const nameLenBuf = Buffer.alloc(4);
+      nameLenBuf.writeUInt32BE(nameBytes.length, 0);
+      buffers.push(nameLenBuf, nameBytes);
+
+      // 4-byte big-endian length of data type + data type bytes
+      const dtLenBuf = Buffer.alloc(4);
+      dtLenBuf.writeUInt32BE(dataTypeBytes.length, 0);
+      buffers.push(dtLenBuf, dataTypeBytes);
+
+      // 1 byte transport type: 1 for String/Number, 2 for Binary
+      const transportType = attr.DataType.startsWith("Binary") ? 2 : 1;
+      buffers.push(Buffer.from([transportType]));
+
+      // 4-byte big-endian length of value + value bytes
+      const valueBytes = transportType === 2
+        ? Buffer.from(attr.BinaryValue ?? "", "base64")
+        : Buffer.from(attr.StringValue ?? "", "utf-8");
+      const valLenBuf = Buffer.alloc(4);
+      valLenBuf.writeUInt32BE(valueBytes.length, 0);
+      buffers.push(valLenBuf, valueBytes);
     }
+    const hasher = new Bun.CryptoHasher("md5");
+    hasher.update(Buffer.concat(buffers));
     return hasher.digest("hex") as string;
   }
 }

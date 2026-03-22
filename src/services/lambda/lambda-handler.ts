@@ -48,8 +48,14 @@ export class LambdaHandler {
         const name = decodeURIComponent(invokeMatch[1]);
         const payload = await req.text();
         const invocationType = req.headers.get("x-amz-invocation-type") ?? "RequestResponse";
+
+        if (invocationType === "DryRun") {
+          return new Response(null, { status: 204, headers: { "x-amzn-RequestId": ctx.requestId } });
+        }
+
         const result = await this.service.invoke(name, payload, invocationType, ctx.region);
 
+        const statusCode = invocationType === "Event" ? 202 : result.statusCode;
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
           "x-amzn-RequestId": ctx.requestId,
@@ -58,7 +64,21 @@ export class LambdaHandler {
         if (result.functionError) headers["X-Amz-Function-Error"] = result.functionError;
         if (result.logResult) headers["X-Amz-Log-Result"] = result.logResult;
 
-        return new Response(result.payload, { status: result.statusCode, headers });
+        return new Response(invocationType === "Event" ? null : result.payload, { status: statusCode, headers });
+      }
+
+      // GET /2020-06-30/functions/{name}/code-signing-config
+      const cscMatch = path.match(/^\/2020-06-30\/functions\/([^/]+)\/code-signing-config$/);
+      if (cscMatch && method === "GET") {
+        return this.json({ CodeSigningConfigArn: null, FunctionName: decodeURIComponent(cscMatch[1]) }, ctx);
+      }
+
+      // GET /2015-03-31/functions/{name}/versions
+      const versionsMatch = path.match(/^\/2015-03-31\/functions\/([^/]+)\/versions$/);
+      if (versionsMatch && method === "GET") {
+        const name = decodeURIComponent(versionsMatch[1]);
+        const fn = this.service.getFunction(name, ctx.region);
+        return this.json({ Versions: [{ ...fnToJson(fn), Version: "$LATEST" }] }, ctx);
       }
 
       // PUT /2015-03-31/functions/{name}/code
@@ -104,7 +124,7 @@ export class LambdaHandler {
       if (esmMatch) {
         const uuid = esmMatch[1];
         if (method === "GET") return this.json(mappingToJson(this.service.getEventSourceMapping(uuid)), ctx);
-        if (method === "DELETE") { this.service.deleteEventSourceMapping(uuid); return new Response(null, { status: 202, headers: { "x-amzn-RequestId": ctx.requestId } }); }
+        if (method === "DELETE") { const deleted = this.service.deleteEventSourceMapping(uuid); return this.json(mappingToJson(deleted), ctx, 202); }
       }
 
       // Tags
@@ -145,8 +165,9 @@ function fnToJson(fn: LambdaFunction): any {
     LastModified: fn.lastModified, Version: fn.version,
     Environment: { Variables: fn.environment },
     State: fn.state, LastUpdateStatus: fn.lastUpdateStatus,
-    Architectures: fn.architectures, Layers: fn.layers,
-    RevisionId: crypto.randomUUID(),
+    Architectures: fn.architectures,
+    Layers: fn.layers?.map(l => ({ Arn: l })),
+    RevisionId: fn.revisionId,
     PackageType: "Zip",
   };
 }

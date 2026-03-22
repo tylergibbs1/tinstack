@@ -64,6 +64,9 @@ export class SnsService {
     const topic = this.getTopic(topicArn, region);
     return {
       TopicArn: topic.topicArn,
+      Owner: this.accountId,
+      DisplayName: topic.attributes.DisplayName ?? topic.name,
+      Policy: topic.attributes.Policy ?? JSON.stringify({ Version: "2012-10-17", Statement: [] }),
       ...topic.attributes,
       SubscriptionsConfirmed: String(topic.subscriptions.length),
       SubscriptionsPending: "0",
@@ -91,6 +94,20 @@ export class SnsService {
     };
     topic.subscriptions.push(sub);
     return sub;
+  }
+
+  getSubscription(subscriptionArn: string, region: string): SnsSubscription {
+    for (const topic of this.topics.values()) {
+      const sub = topic.subscriptions.find((s) => s.subscriptionArn === subscriptionArn);
+      if (sub) return sub;
+    }
+    throw new AwsError("NotFoundException", `Subscription does not exist`, 404);
+  }
+
+  setSubscriptionAttribute(subscriptionArn: string, attributeName: string, attributeValue: string, region: string): void {
+    const sub = this.getSubscription(subscriptionArn, region);
+    if (attributeName === "RawMessageDelivery") sub.rawMessageDelivery = attributeValue === "true";
+    if (attributeName === "FilterPolicy") sub.filterPolicy = attributeValue;
   }
 
   unsubscribe(subscriptionArn: string, region: string): void {
@@ -125,11 +142,26 @@ export class SnsService {
     if (topic) Object.assign(topic.tags, tags);
   }
 
+  listTagsForResource(resourceArn: string, region: string): Record<string, string> {
+    const name = resourceArn.split(":").pop()!;
+    const topic = this.topics.get(this.regionKey(region, name));
+    if (!topic) throw new AwsError("NotFoundException", "Topic does not exist", 404);
+    return topic.tags;
+  }
+
+  untagResource(resourceArn: string, tagKeys: string[], region: string): void {
+    const name = resourceArn.split(":").pop()!;
+    const topic = this.topics.get(this.regionKey(region, name));
+    if (topic) {
+      for (const key of tagKeys) delete topic.tags[key];
+    }
+  }
+
   private getTopic(topicArn: string, region: string): SnsTopic {
     const name = topicArn.split(":").pop()!;
     const key = this.regionKey(region, name);
     const topic = this.topics.get(key);
-    if (!topic) throw new AwsError("NotFound", `Topic does not exist`, 404);
+    if (!topic) throw new AwsError("NotFoundException", `Topic does not exist`, 404);
     return topic;
   }
 }

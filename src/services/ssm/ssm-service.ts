@@ -86,7 +86,7 @@ export class SsmService {
     return { parameters, invalidParameters };
   }
 
-  getParametersByPath(path: string, recursive: boolean, region: string, maxResults?: number): { parameters: SsmParameter[]; nextToken?: string } {
+  getParametersByPath(path: string, recursive: boolean, region: string, maxResults?: number, nextToken?: string): { parameters: SsmParameter[]; nextToken?: string } {
     const prefix = path.endsWith("/") ? path : path + "/";
     const allParams = this.params.values().filter((p) => {
       const k = this.regionKey(region, p.name);
@@ -99,10 +99,12 @@ export class SsmService {
       return true;
     });
 
+    const offset = nextToken ? parseInt(nextToken, 10) : 0;
     const limit = maxResults ?? 10;
+    const sliced = allParams.slice(offset, offset + limit);
     return {
-      parameters: allParams.slice(0, limit),
-      nextToken: allParams.length > limit ? String(limit) : undefined,
+      parameters: sliced,
+      nextToken: offset + limit < allParams.length ? String(offset + limit) : undefined,
     };
   }
 
@@ -127,10 +129,34 @@ export class SsmService {
     return { deletedParameters: deleted, invalidParameters: invalid };
   }
 
-  describeParameters(region: string, filters?: any[], maxResults?: number): { parameters: any[]; nextToken?: string } {
-    const allParams = this.params.values().filter((p) => {
+  describeParameters(region: string, filters?: any[], maxResults?: number, nextToken?: string): { parameters: any[]; nextToken?: string } {
+    let allParams = this.params.values().filter((p) => {
       return this.params.has(this.regionKey(region, p.name));
     });
+
+    // Apply ParameterFilters
+    if (filters && filters.length > 0) {
+      allParams = allParams.filter((p) => {
+        return filters.every((f: any) => {
+          const key: string = f.Key;
+          const option: string | undefined = f.Option;
+          const values: string[] = f.Values ?? [];
+          if (key === "Name") {
+            if (option === "BeginsWith") {
+              return values.some((v) => p.name.startsWith(v));
+            }
+            if (option === "Equals" || !option) {
+              return values.includes(p.name);
+            }
+            return true;
+          }
+          if (key === "Type") {
+            return values.includes(p.type);
+          }
+          return true;
+        });
+      });
+    }
 
     const result = allParams.map((p) => ({
       Name: p.name,
@@ -142,10 +168,12 @@ export class SsmService {
       DataType: p.dataType,
     }));
 
+    const offset = nextToken ? parseInt(nextToken, 10) : 0;
     const limit = maxResults ?? 50;
+    const sliced = result.slice(offset, offset + limit);
     return {
-      parameters: result.slice(0, limit),
-      nextToken: result.length > limit ? String(limit) : undefined,
+      parameters: sliced,
+      nextToken: offset + limit < result.length ? String(offset + limit) : undefined,
     };
   }
 

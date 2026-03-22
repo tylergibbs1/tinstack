@@ -40,6 +40,21 @@ export class DynamoDbHandler {
           return this.describeTimeToLive(body, ctx);
         case "UpdateTimeToLive":
           return this.updateTimeToLive(body, ctx);
+        case "ListTagsOfResource":
+          return this.json({ Tags: this.service.listTagsOfResource(body.ResourceArn, ctx.region) }, ctx);
+        case "TagResource":
+          this.service.tagResource(body.ResourceArn, body.Tags ?? [], ctx.region);
+          return this.json({}, ctx);
+        case "UntagResource":
+          this.service.untagResource(body.ResourceArn, body.TagKeys ?? [], ctx.region);
+          return this.json({}, ctx);
+        case "DescribeContinuousBackups":
+          return this.json({
+            ContinuousBackupsDescription: {
+              ContinuousBackupsStatus: "DISABLED",
+              PointInTimeRecoveryDescription: { PointInTimeRecoveryStatus: "DISABLED" },
+            },
+          }, ctx);
         default:
           return this.error(new AwsError("UnknownOperationException", `Operation ${action} is not supported.`, 400), ctx);
       }
@@ -192,10 +207,12 @@ export class DynamoDbHandler {
       TableStatus: table.tableStatus,
       KeySchema: table.keySchema,
       AttributeDefinitions: table.attributeDefinitions,
-      ProvisionedThroughput: table.provisionedThroughput ? {
-        ...table.provisionedThroughput,
-        NumberOfDecreasesToday: 0,
-      } : undefined,
+      ProvisionedThroughput: table.billingMode === "PAY_PER_REQUEST"
+        ? { ReadCapacityUnits: 0, WriteCapacityUnits: 0, NumberOfDecreasesToday: 0 }
+        : table.provisionedThroughput ? {
+          ...table.provisionedThroughput,
+          NumberOfDecreasesToday: 0,
+        } : undefined,
       BillingModeSummary: table.billingMode ? { BillingMode: table.billingMode } : undefined,
       CreationDateTime: table.creationDateTime,
       ItemCount: table.itemCount,

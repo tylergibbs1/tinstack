@@ -35,13 +35,20 @@ export class SecretsManagerService {
     return `${region}#${name}`;
   }
 
-  createSecret(name: string, secretString: string | undefined, secretBinary: string | undefined, description: string | undefined, kmsKeyId: string | undefined, tags: Record<string, string>, region: string): Secret {
+  createSecret(name: string, secretString: string | undefined, secretBinary: string | undefined, description: string | undefined, kmsKeyId: string | undefined, tags: Record<string, string>, region: string, clientRequestToken?: string): Secret {
     const key = this.regionKey(region, name);
     if (this.secrets.has(key)) {
+      // Idempotent: if same clientRequestToken, return existing secret
+      if (clientRequestToken) {
+        const existing = this.secrets.get(key)!;
+        if (existing.versions.has(clientRequestToken)) {
+          return existing;
+        }
+      }
       throw new AwsError("ResourceExistsException", `The operation failed because the secret ${name} already exists.`, 400);
     }
 
-    const versionId = crypto.randomUUID();
+    const versionId = clientRequestToken ?? crypto.randomUUID();
     const now = Date.now() / 1000;
     const version: SecretVersion = {
       versionId,
@@ -129,7 +136,7 @@ export class SecretsManagerService {
     return secret;
   }
 
-  putSecretValue(secretId: string, secretString: string | undefined, secretBinary: string | undefined, versionStages: string[] | undefined, region: string): { secret: Secret; versionId: string } {
+  putSecretValue(secretId: string, secretString: string | undefined, secretBinary: string | undefined, versionStages: string[] | undefined, region: string, clientRequestToken?: string): { secret: Secret; versionId: string } {
     const secret = this.findSecret(secretId, region);
     const now = Date.now() / 1000;
     const stages = versionStages ?? ["AWSCURRENT"];
@@ -147,7 +154,7 @@ export class SecretsManagerService {
       }
     }
 
-    const versionId = crypto.randomUUID();
+    const versionId = clientRequestToken ?? crypto.randomUUID();
     const version: SecretVersion = {
       versionId,
       secretString,
@@ -166,11 +173,13 @@ export class SecretsManagerService {
 
   deleteSecret(secretId: string, recoveryWindowInDays: number | undefined, forceDelete: boolean, region: string): Secret {
     const secret = this.findSecret(secretId, region);
+    const now = Date.now() / 1000;
     if (forceDelete) {
+      secret.deletedDate = now;
       const key = this.regionKey(region, secret.name);
       this.secrets.delete(key);
     } else {
-      secret.deletedDate = Date.now() / 1000;
+      secret.deletedDate = now;
     }
     return secret;
   }

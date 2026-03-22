@@ -31,7 +31,7 @@ export class KinesisHandler {
           return this.json({ FailedRecordCount: r.failedRecordCount, Records: r.records.map((rec) => ({ ShardId: rec.shardId, SequenceNumber: rec.sequenceNumber })) }, ctx);
         }
         case "GetShardIterator": {
-          const iter = this.service.getShardIterator(body.StreamName, body.ShardId, body.ShardIteratorType, body.StartingSequenceNumber, ctx.region);
+          const iter = this.service.getShardIterator(body.StreamName, body.ShardId, body.ShardIteratorType, body.StartingSequenceNumber, ctx.region, body.Timestamp);
           return this.json({ ShardIterator: iter }, ctx);
         }
         case "GetRecords": {
@@ -41,6 +41,20 @@ export class KinesisHandler {
             NextShardIterator: r.nextShardIterator, MillisBehindLatest: r.millisBehindLatest,
           }, ctx);
         }
+        case "DescribeStreamSummary": return this.json({ StreamDescriptionSummary: this.service.describeStreamSummary(body.StreamName, ctx.region) }, ctx);
+        case "ListTagsForStream": return this.json(this.service.listTagsForStream(body.StreamName, ctx.region), ctx);
+        case "AddTagsToStream": this.service.addTagsToStream(body.StreamName, body.Tags, ctx.region); return this.json({}, ctx);
+        case "IncreaseStreamRetentionPeriod": {
+          const stream = this.service.describeStream(body.StreamName, ctx.region);
+          stream.retentionPeriodHours = body.RetentionPeriodHours ?? 24;
+          return this.json({}, ctx);
+        }
+        case "DecreaseStreamRetentionPeriod": {
+          const stream = this.service.describeStream(body.StreamName, ctx.region);
+          stream.retentionPeriodHours = body.RetentionPeriodHours ?? 24;
+          return this.json({}, ctx);
+        }
+        case "RemoveTagsFromStream": return this.json({}, ctx);
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }

@@ -30,6 +30,42 @@ export class S3Router {
           return this.getBucketLocation(bucket, ctx);
         }
 
+        // Bucket sub-resource GET handlers (Terraform compatibility)
+        if (method === "GET") {
+          const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+          if (params.has("policy")) return this.s3Error("NoSuchBucketPolicy", "The bucket policy does not exist", 404, ctx);
+          if (params.has("versioning")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><VersioningConfiguration xmlns="${ns}"/>`, ctx);
+          if (params.has("encryption")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><ServerSideEncryptionConfiguration xmlns="${ns}"><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>false</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`, ctx);
+          if (params.has("acl")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><AccessControlPolicy xmlns="${ns}"><Owner><ID>000000000000</ID><DisplayName>tinstack</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>000000000000</ID><DisplayName>tinstack</DisplayName></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>`, ctx);
+          if (params.has("tagging")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><Tagging xmlns="${ns}"><TagSet/></Tagging>`, ctx);
+          if (params.has("cors")) return this.s3Error("NoSuchCORSConfiguration", "The CORS configuration does not exist", 404, ctx);
+          if (params.has("logging")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><BucketLoggingStatus xmlns="${ns}"/>`, ctx);
+          if (params.has("website")) return this.s3Error("NoSuchWebsiteConfiguration", "The specified bucket does not have a website configuration", 404, ctx);
+          if (params.has("replication")) return this.s3Error("ReplicationConfigurationNotFoundError", "The replication configuration was not found", 404, ctx);
+          if (params.has("request-payment")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><RequestPaymentConfiguration xmlns="${ns}"><Payer>BucketOwner</Payer></RequestPaymentConfiguration>`, ctx);
+          if (params.has("object-lock")) return this.s3Error("ObjectLockConfigurationNotFoundError", "Object Lock configuration does not exist for this bucket", 404, ctx);
+          if (params.has("ownershipControls")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><OwnershipControls xmlns="${ns}"><Rule><ObjectOwnership>BucketOwnerEnforced</ObjectOwnership></Rule></OwnershipControls>`, ctx);
+          if (params.has("publicAccessBlock")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><PublicAccessBlockConfiguration xmlns="${ns}"><BlockPublicAcls>false</BlockPublicAcls><IgnorePublicAcls>false</IgnorePublicAcls><BlockPublicPolicy>false</BlockPublicPolicy><RestrictPublicBuckets>false</RestrictPublicBuckets></PublicAccessBlockConfiguration>`, ctx);
+          if (params.has("accelerate")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><AccelerateConfiguration xmlns="${ns}"/>`, ctx);
+        }
+
+        // Bucket sub-resource PUT handlers (Terraform compatibility - stub 200 OK)
+        if (method === "PUT") {
+          if (params.has("policy") || params.has("versioning") || params.has("encryption") ||
+              params.has("acl") || params.has("tagging") || params.has("cors") ||
+              params.has("logging") || params.has("publicAccessBlock") || params.has("ownershipControls")) {
+            return new Response(null, { status: 200, headers: { "x-amz-request-id": ctx.requestId } });
+          }
+        }
+
+        // Bucket sub-resource DELETE handlers (Terraform compatibility - stub 204)
+        if (method === "DELETE") {
+          if (params.has("policy") || params.has("cors") || params.has("encryption") ||
+              params.has("tagging") || params.has("publicAccessBlock") || params.has("ownershipControls")) {
+            return new Response(null, { status: 204, headers: { "x-amz-request-id": ctx.requestId } });
+          }
+        }
+
         switch (method) {
           case "PUT":
             return this.createBucket(bucket, ctx);
@@ -101,6 +137,11 @@ export class S3Router {
     const bucket = parts[0];
     const key = parts.length > 1 ? parts.slice(1).join("/") : undefined;
     return { bucket, key: key || undefined };
+  }
+
+  private s3Error(code: string, message: string, status: number, ctx: RequestContext): Response {
+    const body = `<?xml version="1.0" encoding="UTF-8"?><Error><Code>${escapeXml(code)}</Code><Message>${escapeXml(message)}</Message><RequestId>${ctx.requestId}</RequestId></Error>`;
+    return this.xml(body, ctx, status);
   }
 
   private xml(body: string, ctx: RequestContext, status = 200, headers?: Record<string, string>): Response {
@@ -236,16 +277,17 @@ export class S3Router {
 
   private headObject(bucket: string, key: string, ctx: RequestContext): Response {
     const obj = this.service.headObject(bucket, key);
-    return new Response(null, {
-      status: 200,
-      headers: {
-        "Content-Type": obj.contentType,
-        "Content-Length": String(obj.contentLength),
-        ETag: obj.etag,
-        "Last-Modified": obj.lastModified,
-        "x-amz-request-id": ctx.requestId,
-      },
-    });
+    const headers: Record<string, string> = {
+      "Content-Type": obj.contentType,
+      "Content-Length": String(obj.contentLength),
+      ETag: obj.etag,
+      "Last-Modified": obj.lastModified,
+      "x-amz-request-id": ctx.requestId,
+    };
+    for (const [k, v] of Object.entries(obj.metadata)) {
+      headers[`x-amz-meta-${k}`] = v;
+    }
+    return new Response(null, { status: 200, headers });
   }
 
   private deleteObject(bucket: string, key: string, ctx: RequestContext): Response {
@@ -274,7 +316,8 @@ export class S3Router {
 
   private async copyObject(copySource: string, dstBucket: string, dstKey: string, req: Request, ctx: RequestContext): Promise<Response> {
     // copySource format: /bucket/key or bucket/key
-    const src = copySource.startsWith("/") ? copySource.slice(1) : copySource;
+    const decoded = decodeURIComponent(copySource);
+    const src = decoded.startsWith("/") ? decoded.slice(1) : decoded;
     const slashIdx = src.indexOf("/");
     const srcBucket = src.slice(0, slashIdx);
     const srcKey = src.slice(slashIdx + 1);
