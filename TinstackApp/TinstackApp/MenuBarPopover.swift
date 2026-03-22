@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarPopover: View {
     @Bindable var engine: TinstackEngine
+    @Environment(\.openWindow) private var openWindow
     @State private var copiedEndpoint = false
     @State private var copiedConfig = false
 
@@ -52,7 +53,8 @@ struct MenuBarPopover: View {
 
                 QuickAction(icon: "rectangle.3.group", title: "Open Data Browser",
                             subtitle: "Browse S3, DynamoDB, SQS") {
-                    openDashboard()
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                    openWindow(id: "dashboard")
                 }
             }
             .padding(.vertical, 4)
