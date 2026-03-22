@@ -128,6 +128,11 @@ export class AslEngine {
     switch (state.Type) {
       case "Task":
         result = await this.executeTask(state, effectiveInput);
+        // Handle Catch transition
+        if (result?.__aslCatchNext) {
+          this.addEvent("StateExited", this.eventCounter, { name: stateName, output: JSON.stringify(result.__aslCatchInput) });
+          return this.executeState(definition, result.__aslCatchNext, result.__aslCatchInput);
+        }
         break;
       case "Pass":
         result = this.executePass(state, effectiveInput);
