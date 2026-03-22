@@ -1,8 +1,14 @@
-# tinstack
+<p align="center">
+  <img src="logo.svg" width="180" alt="Tinstack logo" />
+</p>
 
-A lightweight, zero-dependency AWS local emulator written in TypeScript and running on [Bun](https://bun.sh). All 158 emulated services sit behind a single HTTP endpoint (default `:4566`). Point any AWS SDK at `http://localhost:4566` and it just works.
+<h1 align="center">tinstack</h1>
 
-Inspired by [floci](https://github.com/hectorvent/floci) (Java/Quarkus) — rewritten from scratch in TypeScript for contributor accessibility, Bun's batteries-included APIs, and single-binary distribution.
+<p align="center">A lightweight, zero-dependency AWS local emulator written in TypeScript and running on <a href="https://bun.sh">Bun</a>. All 158 emulated services sit behind a single HTTP endpoint (default <code>:4566</code>). Point any AWS SDK at <code>http://localhost:4566</code> and it just works.</p>
+
+<p align="center">
+  Inspired by <a href="https://github.com/hectorvent/floci">floci</a> (Java/Quarkus) — rewritten from scratch in TypeScript for contributor accessibility, Bun's batteries-included APIs, and single-binary distribution.
+</p>
 
 ## Quick Start
 
