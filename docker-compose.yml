@@ -1,0 +1,10 @@
+services:
+  tinstack:
+    build: .
+    ports:
+      - "4566:4566"
+    environment:
+      - PORT=4566
+      - TINSTACK_DEFAULT_REGION=us-east-1
+      - TINSTACK_STORAGE_MODE=memory
+      - TINSTACK_LOG_LEVEL=info
