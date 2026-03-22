@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -259,6 +260,192 @@ final class TinstackEngine {
                   let data = try? JSONEncoder().encode(self)
             else { return }
             defaults.set(data, forKey: WidgetStatus.key)
+        }
+    }
+
+    // MARK: - Data Browser (talks to tinstack via HTTP)
+
+    var endpoint: String { "http://localhost:\(port)" }
+
+    func copyEndpoint() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(endpoint, forType: .string)
+    }
+
+    func copySdkConfig() {
+        let config = """
+        {
+          endpoint: "\(endpoint)",
+          region: "\(region)",
+          credentials: { accessKeyId: "test", secretAccessKey: "test" },
+          forcePathStyle: true,
+        }
+        """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(config, forType: .string)
+    }
+
+    func resetAllData() {
+        stop()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.start()
+        }
+    }
+
+    // MARK: - S3 Browser
+
+    struct S3Bucket: Identifiable, Hashable {
+        let id: String
+        var name: String
+        var creationDate: String
+    }
+
+    struct S3Object: Identifiable {
+        let id: String
+        var key: String
+        var size: Int
+        var lastModified: String
+    }
+
+    var s3Buckets: [S3Bucket] = []
+    var s3Objects: [S3Object] = []
+    var selectedBucket: S3Bucket?
+
+    func fetchS3Buckets() async {
+        guard isRunning else { return }
+        guard let url = URL(string: endpoint) else { return }
+        var req = URLRequest(url: url)
+        req.setValue("AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/s3/aws4_request", forHTTPHeaderField: "Authorization")
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let xml = String(data: data, encoding: .utf8) else { return }
+
+        // Parse bucket names from XML: <Name>...</Name>
+        let nameRegex = try? NSRegularExpression(pattern: "<Name>(.+?)</Name>")
+        let dateRegex = try? NSRegularExpression(pattern: "<CreationDate>(.+?)</CreationDate>")
+        let names = extractMatches(nameRegex, in: xml)
+        let dates = extractMatches(dateRegex, in: xml)
+
+        s3Buckets = names.enumerated().map { i, name in
+            S3Bucket(id: name, name: name, creationDate: i < dates.count ? dates[i] : "")
+        }
+    }
+
+    func fetchS3Objects(bucket: String) async {
+        guard isRunning, let url = URL(string: "\(endpoint)/\(bucket)?list-type=2") else { return }
+        var req = URLRequest(url: url)
+        req.setValue("AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/s3/aws4_request", forHTTPHeaderField: "Authorization")
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let xml = String(data: data, encoding: .utf8) else { return }
+
+        let keyRegex = try? NSRegularExpression(pattern: "<Key>(.+?)</Key>")
+        let sizeRegex = try? NSRegularExpression(pattern: "<Size>(.+?)</Size>")
+        let keys = extractMatches(keyRegex, in: xml)
+        let sizes = extractMatches(sizeRegex, in: xml)
+
+        s3Objects = keys.enumerated().map { i, key in
+            S3Object(id: key, key: key, size: i < sizes.count ? (Int(sizes[i]) ?? 0) : 0, lastModified: "")
+        }
+    }
+
+    func deleteS3Object(bucket: String, key: String) async {
+        guard let url = URL(string: "\(endpoint)/\(bucket)/\(key)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        req.setValue("AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/s3/aws4_request", forHTTPHeaderField: "Authorization")
+        _ = try? await URLSession.shared.data(for: req)
+        await fetchS3Objects(bucket: bucket)
+    }
+
+    // MARK: - DynamoDB Browser
+
+    struct DDBTable: Identifiable, Hashable {
+        let id: String
+        var name: String
+    }
+
+    struct DDBItem: Identifiable {
+        let id: String
+        var attributes: [(key: String, value: String)]
+    }
+
+    var ddbTables: [DDBTable] = []
+    var ddbItems: [DDBItem] = []
+
+    func fetchDDBTables() async {
+        guard isRunning else { return }
+        let result = await postJSON(target: "DynamoDB_20120810.ListTables", body: "{}")
+        guard let data = result,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let names = json["TableNames"] as? [String] else { return }
+        ddbTables = names.map { DDBTable(id: $0, name: $0) }
+    }
+
+    func fetchDDBItems(table: String) async {
+        guard isRunning else { return }
+        let body = "{\"TableName\":\"\(table)\",\"Limit\":50}"
+        let result = await postJSON(target: "DynamoDB_20120810.Scan", body: body)
+        guard let data = result,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = json["Items"] as? [[String: Any]] else { return }
+
+        ddbItems = items.enumerated().map { i, item in
+            let attrs = item.compactMap { key, val -> (key: String, value: String)? in
+                guard let typed = val as? [String: Any],
+                      let first = typed.first else { return nil }
+                return (key: key, value: "\(first.value)")
+            }.sorted { $0.key < $1.key }
+            return DDBItem(id: "\(i)", attributes: attrs)
+        }
+    }
+
+    // MARK: - SQS Browser
+
+    struct SQSQueue: Identifiable, Hashable {
+        let id: String
+        var url: String
+        var name: String
+    }
+
+    var sqsQueues: [SQSQueue] = []
+
+    func fetchSQSQueues() async {
+        guard isRunning else { return }
+        let result = await postJSON(target: "AmazonSQS.ListQueues", body: "{}")
+        guard let data = result,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let urls = json["QueueUrls"] as? [String] else {
+            sqsQueues = []
+            return
+        }
+        sqsQueues = urls.map { url in
+            let name = url.split(separator: "/").last.map(String.init) ?? url
+            return SQSQueue(id: url, url: url, name: name)
+        }
+    }
+
+    func purgeSQSQueue(url: String) async {
+        guard isRunning else { return }
+        _ = await postJSON(target: "AmazonSQS.PurgeQueue", body: "{\"QueueUrl\":\"\(url)\"}")
+        await fetchSQSQueues()
+    }
+
+    // MARK: - HTTP Helpers
+
+    private func postJSON(target: String, body: String) async -> Data? {
+        guard let url = URL(string: endpoint) else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.httpBody = body.data(using: .utf8)
+        req.setValue("application/x-amz-json-1.0", forHTTPHeaderField: "Content-Type")
+        req.setValue(target, forHTTPHeaderField: "X-Amz-Target")
+        return try? await URLSession.shared.data(for: req).0
+    }
+
+    private func extractMatches(_ regex: NSRegularExpression?, in text: String) -> [String] {
+        guard let regex else { return [] }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.matches(in: text, range: range).compactMap { match in
+            Range(match.range(at: 1), in: text).map { String(text[$0]) }
         }
     }
 

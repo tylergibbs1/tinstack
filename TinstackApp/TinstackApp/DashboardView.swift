@@ -2,395 +2,406 @@ import SwiftUI
 
 struct DashboardView: View {
     @Bindable var engine: TinstackEngine
-    @State private var selectedTab = "services"
-    @State private var searchText = ""
-    @State private var selectedService: String?
+    @State private var selectedTab: BrowserTab = .s3
+
+    enum BrowserTab: String, CaseIterable {
+        case s3 = "S3"
+        case dynamodb = "DynamoDB"
+        case sqs = "SQS"
+    }
 
     var body: some View {
         NavigationSplitView {
-            sidebar
+            List(selection: $selectedTab) {
+                Section("Data Browser") {
+                    ForEach(BrowserTab.allCases, id: \.self) { tab in
+                        Label(tab.rawValue, systemImage: iconFor(tab))
+                            .tag(tab)
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+            .frame(minWidth: 160)
         } detail: {
-            detailContent
+            if !engine.isRunning {
+                ContentUnavailableView {
+                    Label("Server Not Running", systemImage: "bolt.slash")
+                } description: {
+                    Text("Start Tinstack to browse data")
+                }
+            } else {
+                switch selectedTab {
+                case .s3: S3BrowserView(engine: engine)
+                case .dynamodb: DynamoDBBrowserView(engine: engine)
+                case .sqs: SQSBrowserView(engine: engine)
+                }
+            }
         }
-        .navigationTitle("Tinstack Dashboard")
+        .navigationTitle("Tinstack")
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 HStack(spacing: 6) {
                     Circle()
                         .fill(engine.isRunning ? Color.green : Color.gray)
                         .frame(width: 8, height: 8)
-                    Text(engine.isRunning ? "Running on :\(engine.port)" : "Stopped")
-                        .font(.caption)
+                    Text(engine.isRunning ? ":\(engine.port)" : "Stopped")
+                        .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
             }
             ToolbarItem {
                 Button {
-                    if engine.isRunning { engine.stop() } else { engine.start() }
+                    engine.isRunning ? engine.stop() : engine.start()
                 } label: {
-                    Label(
-                        engine.isRunning ? "Stop" : "Start",
-                        systemImage: engine.isRunning ? "stop.fill" : "play.fill"
-                    )
+                    Label(engine.isRunning ? "Stop" : "Start",
+                          systemImage: engine.isRunning ? "stop.fill" : "play.fill")
                 }
             }
         }
     }
 
-    // MARK: - Sidebar
-
-    private var sidebar: some View {
-        List(selection: $selectedTab) {
-            Section("Monitor") {
-                Label("Services", systemImage: "cube.box")
-                    .tag("services")
-                Label("Request Log", systemImage: "list.bullet.rectangle")
-                    .tag("requests")
-                Label("Metrics", systemImage: "chart.bar")
-                    .tag("metrics")
-            }
-
-            Section("Browse") {
-                Label("S3 Buckets", systemImage: "externaldrive")
-                    .tag("s3")
-                Label("DynamoDB Tables", systemImage: "tablecells")
-                    .tag("dynamodb")
-                Label("SQS Queues", systemImage: "tray.2")
-                    .tag("sqs")
-            }
-        }
-        .listStyle(.sidebar)
-        .frame(minWidth: 180)
-    }
-
-    // MARK: - Detail Content
-
-    @ViewBuilder
-    private var detailContent: some View {
-        switch selectedTab {
-        case "services":
-            ServicesListView(engine: engine, searchText: $searchText)
-        case "requests":
-            RequestLogView(engine: engine)
-        case "metrics":
-            MetricsView(engine: engine)
-        default:
-            ComingSoonView(feature: selectedTab)
+    private func iconFor(_ tab: BrowserTab) -> String {
+        switch tab {
+        case .s3: return "externaldrive"
+        case .dynamodb: return "tablecells"
+        case .sqs: return "tray.2"
         }
     }
 }
 
-// MARK: - Services List
+// MARK: - S3 Browser
 
-struct ServicesListView: View {
+struct S3BrowserView: View {
     @Bindable var engine: TinstackEngine
-    @Binding var searchText: String
-    @State private var filteredServices: [TinstackEngine.ServiceStat] = []
+    @State private var selectedBucket: TinstackEngine.S3Bucket?
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("Filter services...", text: $searchText)
-                    .textFieldStyle(.plain)
-                if !searchText.isEmpty {
-                    Button { searchText = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
+        HSplitView {
+            // Bucket list
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Buckets")
+                        .font(.headline)
+                    Spacer()
+                    Button(action: { Task { await engine.fetchS3Buckets() } }) {
+                        Image(systemName: "arrow.clockwise")
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Refresh buckets")
+                }
+                .padding(10)
+
+                Divider()
+
+                if engine.s3Buckets.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "externaldrive")
+                            .font(.title)
+                            .foregroundStyle(.secondary)
+                        Text("No buckets")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(engine.s3Buckets, selection: $selectedBucket) { bucket in
+                        HStack {
+                            Image(systemName: "folder")
+                                .foregroundStyle(.blue)
+                            Text(bucket.name)
+                                .font(.callout)
+                        }
+                        .tag(bucket)
+                    }
                 }
             }
-            .padding(8)
-            .background(.quaternary.opacity(0.5))
+            .frame(minWidth: 200, idealWidth: 240)
 
-            Divider()
+            // Object list
+            VStack(spacing: 0) {
+                if let bucket = selectedBucket {
+                    HStack {
+                        Image(systemName: "folder.fill")
+                            .foregroundStyle(.blue)
+                        Text(bucket.name)
+                            .font(.headline)
+                        Spacer()
+                        Text("\(engine.s3Objects.count) objects")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button(action: { Task { await engine.fetchS3Objects(bucket: bucket.name) } }) {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(10)
 
-            if filteredServices.isEmpty && !engine.isRunning {
-                ContentUnavailableView {
-                    Label("Server Not Running", systemImage: "icloud.slash")
-                } description: {
-                    Text("Start the server to see active services")
-                }
-            } else if filteredServices.isEmpty {
-                ContentUnavailableView {
-                    Label("No Matching Services", systemImage: "magnifyingglass")
-                } description: {
-                    Text("No services match \"\(searchText)\"")
-                }
-            } else {
-                Table(filteredServices) {
-                    TableColumn("Service") { stat in
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(.green)
-                                .frame(width: 6, height: 6)
-                            Text(stat.name)
-                                .font(.body)
+                    Divider()
+
+                    if engine.s3Objects.isEmpty {
+                        ContentUnavailableView {
+                            Label("Empty Bucket", systemImage: "tray")
+                        } description: {
+                            Text("No objects in \(bucket.name)")
+                        }
+                    } else {
+                        Table(engine.s3Objects) {
+                            TableColumn("Key") { obj in
+                                HStack(spacing: 4) {
+                                    Image(systemName: fileIcon(obj.key))
+                                        .foregroundStyle(.secondary)
+                                        .font(.caption)
+                                    Text(obj.key)
+                                        .font(.callout.monospaced())
+                                        .lineLimit(1)
+                                }
+                            }
+                            .width(min: 200, ideal: 400)
+
+                            TableColumn("Size") { obj in
+                                Text(formatBytes(obj.size))
+                                    .font(.callout.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .width(ideal: 80)
+
+                            TableColumn("") { obj in
+                                Button(role: .destructive) {
+                                    Task { await engine.deleteS3Object(bucket: bucket.name, key: obj.key) }
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.red)
+                                .accessibilityLabel("Delete \(obj.key)")
+                            }
+                            .width(30)
                         }
                     }
-                    .width(min: 120, ideal: 180)
-
-                    TableColumn("Requests") { stat in
-                        Text("\(stat.requestCount)")
-                            .font(.body.monospacedDigit())
-                            .foregroundStyle(stat.requestCount > 0 ? Color.primary : Color.gray)
+                } else {
+                    ContentUnavailableView {
+                        Label("Select a Bucket", systemImage: "sidebar.left")
+                    } description: {
+                        Text("Choose a bucket from the list to view objects")
                     }
-                    .width(ideal: 80)
-
-                    TableColumn("Errors") { stat in
-                        Text("\(stat.errorCount)")
-                            .font(.body.monospacedDigit())
-                            .foregroundStyle(stat.errorCount > 0 ? Color.red : Color.gray)
-                    }
-                    .width(ideal: 60)
-
-                    TableColumn("Last Request") { stat in
-                        if let last = stat.lastRequest {
-                            Text(last, style: .relative)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("—")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .width(ideal: 120)
                 }
             }
         }
-        .onChange(of: searchText) { updateFilter() }
-        .onChange(of: engine.serviceStats) { updateFilter() }
-        .onAppear { updateFilter() }
+        .task { await engine.fetchS3Buckets() }
+        .onChange(of: selectedBucket) {
+            if let bucket = selectedBucket {
+                Task { await engine.fetchS3Objects(bucket: bucket.name) }
+            }
+        }
     }
 
-    private func updateFilter() {
-        if searchText.isEmpty {
-            filteredServices = engine.serviceStats
-        } else {
-            filteredServices = engine.serviceStats.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    private func fileIcon(_ key: String) -> String {
+        if key.hasSuffix("/") { return "folder" }
+        let ext = key.split(separator: ".").last.map(String.init)?.lowercased() ?? ""
+        switch ext {
+        case "json": return "curlybraces"
+        case "txt", "md", "csv": return "doc.text"
+        case "png", "jpg", "jpeg", "gif", "svg": return "photo"
+        case "pdf": return "doc.richtext"
+        case "zip", "gz", "tar": return "doc.zipper"
+        case "js", "ts", "py", "rb", "go": return "chevron.left.forwardslash.chevron.right"
+        default: return "doc"
+        }
+    }
+
+    private func formatBytes(_ bytes: Int) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024) }
+        return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
+    }
+}
+
+// MARK: - DynamoDB Browser
+
+struct DynamoDBBrowserView: View {
+    @Bindable var engine: TinstackEngine
+    @State private var selectedTable: TinstackEngine.DDBTable?
+
+    var body: some View {
+        HSplitView {
+            // Table list
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Tables")
+                        .font(.headline)
+                    Spacer()
+                    Button(action: { Task { await engine.fetchDDBTables() } }) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Refresh tables")
+                }
+                .padding(10)
+
+                Divider()
+
+                if engine.ddbTables.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "tablecells")
+                            .font(.title)
+                            .foregroundStyle(.secondary)
+                        Text("No tables")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(engine.ddbTables, selection: $selectedTable) { table in
+                        HStack {
+                            Image(systemName: "tablecells")
+                                .foregroundStyle(.orange)
+                            Text(table.name)
+                                .font(.callout)
+                        }
+                        .tag(table)
+                    }
+                }
+            }
+            .frame(minWidth: 200, idealWidth: 240)
+
+            // Items view
+            VStack(spacing: 0) {
+                if let table = selectedTable {
+                    HStack {
+                        Image(systemName: "tablecells.fill")
+                            .foregroundStyle(.orange)
+                        Text(table.name)
+                            .font(.headline)
+                        Spacer()
+                        Text("\(engine.ddbItems.count) items")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button(action: { Task { await engine.fetchDDBItems(table: table.name) } }) {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(10)
+
+                    Divider()
+
+                    if engine.ddbItems.isEmpty {
+                        ContentUnavailableView {
+                            Label("Empty Table", systemImage: "tray")
+                        } description: {
+                            Text("No items in \(table.name)")
+                        }
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 1) {
+                                ForEach(engine.ddbItems) { item in
+                                    DDBItemRow(item: item)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    ContentUnavailableView {
+                        Label("Select a Table", systemImage: "sidebar.left")
+                    } description: {
+                        Text("Choose a table from the list to view items")
+                    }
+                }
+            }
+        }
+        .task { await engine.fetchDDBTables() }
+        .onChange(of: selectedTable) {
+            if let table = selectedTable {
+                Task { await engine.fetchDDBItems(table: table.name) }
+            }
         }
     }
 }
 
-// MARK: - Request Log
+private struct DDBItemRow: View {
+    let item: TinstackEngine.DDBItem
 
-struct RequestLogView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(item.attributes, id: \.key) { attr in
+                HStack(alignment: .top, spacing: 8) {
+                    Text(attr.key)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 100, alignment: .trailing)
+                    Text(attr.value)
+                        .font(.caption.monospaced())
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.02))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - SQS Browser
+
+struct SQSBrowserView: View {
     @Bindable var engine: TinstackEngine
-    @State private var filterService = "All"
-    @State private var filterStatus = "All"
-    @State private var filteredLog: [TinstackEngine.RequestEntry] = []
-    @State private var availableServices: [String] = []
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Picker("Service:", selection: $filterService) {
-                    Text("All").tag("All")
-                    ForEach(availableServices, id: \.self) { svc in
-                        Text(svc).tag(svc)
-                    }
-                }
-                .frame(width: 200)
-
-                Picker("Status:", selection: $filterStatus) {
-                    Text("All").tag("All")
-                    Text("Success").tag("Success")
-                    Text("Error").tag("Error")
-                }
-                .frame(width: 140)
-
+                Text("Queues")
+                    .font(.headline)
                 Spacer()
-
-                Text("\(filteredLog.count) requests")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Button("Clear") { engine.clearLog() }
-                    .font(.caption)
+                Button(action: { Task { await engine.fetchSQSQueues() } }) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Refresh queues")
             }
-            .padding(8)
-            .background(.quaternary.opacity(0.5))
+            .padding(10)
 
             Divider()
 
-            if filteredLog.isEmpty {
+            if engine.sqsQueues.isEmpty {
                 ContentUnavailableView {
-                    Label("No Requests", systemImage: "network.slash")
+                    Label("No Queues", systemImage: "tray.2")
                 } description: {
-                    Text("Requests will appear here as they come in")
+                    Text("Create queues via the AWS SDK to see them here")
                 }
             } else {
-                Table(filteredLog) {
-                    TableColumn("Time") { entry in
-                        Text(entry.timestamp, style: .time)
-                            .font(.system(.caption, design: .monospaced))
-                    }
-                    .width(ideal: 80)
+                List(engine.sqsQueues) { queue in
+                    HStack(spacing: 10) {
+                        Image(systemName: queue.name.hasSuffix(".fifo") ? "list.number" : "tray")
+                            .foregroundStyle(.purple)
+                            .frame(width: 20)
 
-                    TableColumn("Method") { entry in
-                        Text(entry.method)
-                            .font(.system(.caption, design: .monospaced, weight: .bold))
-                            .foregroundStyle(methodColor(entry.method))
-                    }
-                    .width(ideal: 50)
-
-                    TableColumn("Service") { entry in
-                        Text(entry.service)
-                            .font(.caption)
-                    }
-                    .width(ideal: 100)
-
-                    TableColumn("Target") { entry in
-                        Text(entry.target)
-                            .font(.system(.caption, design: .monospaced))
-                            .lineLimit(1)
-                    }
-                    .width(min: 150, ideal: 300)
-
-                    TableColumn("Status") { entry in
-                        Text("\(entry.status)")
-                            .font(.system(.caption, design: .monospaced, weight: .semibold))
-                            .foregroundStyle(entry.status < 400 ? .green : .red)
-                    }
-                    .width(ideal: 50)
-
-                    TableColumn("Duration") { entry in
-                        Text("\(entry.duration)ms")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                    .width(ideal: 60)
-                }
-            }
-        }
-        .onChange(of: filterService) { updateLogFilter() }
-        .onChange(of: filterStatus) { updateLogFilter() }
-        .onChange(of: engine.requestLog.count) { updateLogFilter() }
-        .onAppear { updateLogFilter() }
-    }
-
-    private func methodColor(_ method: String) -> Color {
-        switch method {
-        case "GET": return .blue
-        case "POST": return .green
-        case "PUT": return .orange
-        case "DELETE": return .red
-        default: return .gray
-        }
-    }
-
-    private func updateLogFilter() {
-        filteredLog = engine.requestLog.filter { entry in
-            (filterService == "All" || entry.service == filterService) &&
-            (filterStatus == "All" ||
-             (filterStatus == "Success" && entry.status < 400) ||
-             (filterStatus == "Error" && entry.status >= 400))
-        }
-        availableServices = Array(Set(engine.requestLog.map(\.service))).sorted()
-    }
-}
-
-// MARK: - Metrics
-
-struct MetricsView: View {
-    @Bindable var engine: TinstackEngine
-    @State private var topServices: [TinstackEngine.ServiceStat] = []
-    @State private var activeCount = 0
-    @State private var errorTotal = 0
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack(spacing: 16) {
-                    MetricCard(title: "Total Requests", value: "\(engine.totalRequests)", icon: "arrow.up.arrow.down", color: .blue)
-                    MetricCard(title: "Active Services", value: "\(activeCount)", icon: "cube.box.fill", color: .green)
-                    MetricCard(title: "Total Errors", value: "\(errorTotal)", icon: "exclamationmark.triangle.fill", color: .red)
-                    MetricCard(title: "Uptime", value: engine.uptime, icon: "clock.fill", color: .orange)
-                }
-                .padding(.horizontal)
-
-                if !topServices.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Top Services by Request Count")
-                            .font(.headline)
-                            .padding(.horizontal)
-
-                        let maxCount = topServices.first?.requestCount ?? 1
-                        ForEach(topServices) { stat in
-                            HStack(spacing: 8) {
-                                Text(stat.name)
-                                    .font(.caption)
-                                    .frame(width: 120, alignment: .trailing)
-
-                                GeometryReader { geo in
-                                    RoundedRectangle(cornerRadius: 3)
-                                        .fill(.blue.gradient)
-                                        .frame(width: max(4, geo.size.width * CGFloat(stat.requestCount) / CGFloat(maxCount)))
-                                }
-                                .frame(height: 16)
-
-                                Text("\(stat.requestCount)")
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 40, alignment: .trailing)
-                            }
-                            .padding(.horizontal)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(queue.name)
+                                .font(.callout.weight(.medium))
+                            Text(queue.url)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .textSelection(.enabled)
                         }
+
+                        Spacer()
+
+                        Button("Purge") {
+                            Task { await engine.purgeSQSQueue(url: queue.url) }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Purge queue \(queue.name)")
                     }
+                    .padding(.vertical, 4)
                 }
             }
-            .padding(.vertical)
         }
-        .onChange(of: engine.serviceStats) { updateMetrics() }
-        .onAppear { updateMetrics() }
-    }
-
-    private func updateMetrics() {
-        topServices = engine.serviceStats
-            .filter { $0.requestCount > 0 }
-            .sorted { $0.requestCount > $1.requestCount }
-            .prefix(15)
-            .map { $0 }
-        activeCount = topServices.count
-        errorTotal = engine.serviceStats.reduce(0) { $0 + $1.errorCount }
-    }
-}
-
-struct MetricCard: View {
-    let title: String
-    let value: String
-    let icon: String
-    let color: Color
-
-    var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundStyle(color)
-            Text(value)
-                .font(.title3.weight(.semibold).monospacedDigit())
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
-    }
-}
-
-// MARK: - Coming Soon
-
-struct ComingSoonView: View {
-    let feature: String
-
-    var body: some View {
-        ContentUnavailableView {
-            Label("\(feature.capitalized) Browser", systemImage: "wrench.and.screwdriver")
-        } description: {
-            Text("Data browser coming soon")
-        }
+        .task { await engine.fetchSQSQueues() }
     }
 }
