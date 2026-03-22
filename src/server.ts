@@ -33,10 +33,16 @@ import { IamService } from "./services/iam/iam-service";
 import { IamQueryHandler } from "./services/iam/iam-handler";
 import { KmsService } from "./services/kms/kms-service";
 import { KmsHandler } from "./services/kms/kms-handler";
+import { CognitoService } from "./services/cognito/cognito-service";
+import { CognitoHandler } from "./services/cognito/cognito-handler";
 
 // Phase 4 — Infrastructure
 import { CloudWatchLogsService } from "./services/cloudwatchlogs/logs-service";
 import { CloudWatchLogsHandler } from "./services/cloudwatchlogs/logs-handler";
+import { CloudWatchMetricsService } from "./services/cloudwatchmetrics/metrics-service";
+import { CloudWatchMetricsHandler } from "./services/cloudwatchmetrics/metrics-handler";
+import { DynamoDbStreamsService } from "./services/dynamodb/streams-service";
+import { DynamoDbStreamsHandler } from "./services/dynamodb/streams-handler";
 
 function isEnabled(config: TinstackConfig, serviceName: string): boolean {
   if (config.enabledServices === "*") return true;
@@ -121,10 +127,25 @@ export function createServer(config: TinstackConfig) {
     enabledNames.push("KMS");
   }
 
+  if (isEnabled(config, "cognito-idp")) {
+    jsonRouter.register("cognito", new CognitoHandler(new CognitoService(config.defaultAccountId)));
+    enabledNames.push("Cognito");
+  }
+
   // Phase 4 — Infrastructure
   if (isEnabled(config, "logs")) {
     jsonRouter.register("cloudwatchlogs", new CloudWatchLogsHandler(new CloudWatchLogsService(config.defaultAccountId)));
     enabledNames.push("CloudWatch Logs");
+  }
+
+  if (isEnabled(config, "monitoring")) {
+    jsonRouter.register("cloudwatch", new CloudWatchMetricsHandler(new CloudWatchMetricsService(config.defaultAccountId)));
+    enabledNames.push("CloudWatch Metrics");
+  }
+
+  if (isEnabled(config, "dynamodbstreams")) {
+    jsonRouter.register("dynamodbstreams", new DynamoDbStreamsHandler(new DynamoDbStreamsService(config.defaultAccountId)));
+    enabledNames.push("DynamoDB Streams");
   }
 
   const s3Router = (globalThis as any).__tinstackS3Router as S3Router | undefined;

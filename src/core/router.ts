@@ -17,6 +17,7 @@ const TARGET_PREFIX_MAP: Record<string, string> = {
   AWSEvents: "eventbridge",
   "Kinesis_20131202": "kinesis",
   AWSCognitoIdentityProviderService: "cognito",
+  DynamoDBStreams_20120810: "dynamodbstreams",
   "SNS_20100331": "sns",
   AWSStepFunctions: "stepfunctions",
   GraniteServiceVersion20100801: "cloudwatch",
