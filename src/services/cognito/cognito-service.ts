@@ -58,6 +58,16 @@ export interface CognitoUser {
   mfaEnabled: boolean;
 }
 
+export interface UserGroup {
+  GroupName: string;
+  UserPoolId: string;
+  Description?: string;
+  RoleArn?: string;
+  Precedence?: number;
+  CreationDate: number;
+  LastModifiedDate: number;
+}
+
 export interface AuthResult {
   AccessToken: string;
   IdToken: string;
@@ -66,10 +76,32 @@ export interface AuthResult {
   TokenType: string;
 }
 
+export interface UserPoolDomain {
+  userPoolId: string;
+  domain: string;
+  cloudFrontDomain: string;
+  status: string;
+  creationDate: number;
+}
+
+export interface IdentityProvider {
+  userPoolId: string;
+  providerName: string;
+  providerType: string;
+  providerDetails: Record<string, string>;
+  attributeMapping: Record<string, string>;
+  creationDate: number;
+  lastModifiedDate: number;
+}
+
 export class CognitoService {
   private pools: StorageBackend<string, UserPool>;
   private clients: StorageBackend<string, UserPoolClient>;
   private users: StorageBackend<string, CognitoUser>;
+  private groups: StorageBackend<string, UserGroup>;
+  private domains: StorageBackend<string, UserPoolDomain>;
+  private identityProviders: StorageBackend<string, IdentityProvider>;
+  private userGroupMemberships: Map<string, Set<string>> = new Map(); // "poolId#username" -> Set<groupName>
   private poolCounter = 0;
   private clientIdToPoolId: Map<string, string> = new Map();
   private refreshTokenToUsername: Map<string, { username: string; userPoolId: string }> = new Map();
@@ -81,6 +113,9 @@ export class CognitoService {
     this.pools = new InMemoryStorage();
     this.clients = new InMemoryStorage();
     this.users = new InMemoryStorage();
+    this.groups = new InMemoryStorage();
+    this.domains = new InMemoryStorage();
+    this.identityProviders = new InMemoryStorage();
   }
 
   private regionKey(region: string, id: string): string {
@@ -175,7 +210,8 @@ export class CognitoService {
   }
 
   signUp(userPoolId: string, username: string, password: string, userAttributes: { Name: string; Value: string }[], region: string): CognitoUser {
-    this.describeUserPool(userPoolId, region);
+    const pool = this.getPool(userPoolId, region);
+    this.validatePassword(password, pool);
     const key = `${userPoolId}#${username}`;
     if (this.users.has(key)) throw new AwsError("UsernameExistsException", `User already exists.`, 400);
 
@@ -208,7 +244,8 @@ export class CognitoService {
   }
 
   adminCreateUser(userPoolId: string, username: string, temporaryPassword: string | undefined, userAttributes: { Name: string; Value: string }[], region: string): CognitoUser {
-    this.describeUserPool(userPoolId, region);
+    const pool = this.getPool(userPoolId, region);
+    if (temporaryPassword) this.validatePassword(temporaryPassword, pool);
     const key = `${userPoolId}#${username}`;
     if (this.users.has(key)) throw new AwsError("UsernameExistsException", `User already exists.`, 400);
 
@@ -342,6 +379,8 @@ export class CognitoService {
 
   confirmForgotPassword(clientId: string, username: string, confirmationCode: string, password: string, region: string): void {
     const poolId = this.resolvePoolIdFromClientId(clientId);
+    const pool = this.getPool(poolId, region);
+    this.validatePassword(password, pool);
     const key = `${poolId}#${username}`;
     const storedCode = this.confirmationCodes.get(key);
     if (!storedCode || storedCode !== confirmationCode) {
@@ -364,6 +403,8 @@ export class CognitoService {
   }
 
   adminSetUserPassword(userPoolId: string, username: string, password: string, permanent: boolean, region: string): void {
+    const pool = this.getPool(userPoolId, region);
+    this.validatePassword(password, pool);
     const user = this.getUser(userPoolId, username);
     user.password = password;
     if (permanent) {
@@ -395,6 +436,8 @@ export class CognitoService {
       if (!username || !newPassword) {
         throw new AwsError("InvalidParameterException", "USERNAME and NEW_PASSWORD are required.", 400);
       }
+      const pool = this.getPool(poolId, region);
+      this.validatePassword(newPassword, pool);
       const user = this.getUser(poolId, username);
       user.password = newPassword;
       user.userStatus = "CONFIRMED";
@@ -413,6 +456,192 @@ export class CognitoService {
         this.invalidatedRefreshTokens.add(token);
       }
     }
+  }
+
+  createGroup(userPoolId: string, groupName: string, description: string | undefined, roleArn: string | undefined, precedence: number | undefined, region: string): UserGroup {
+    this.describeUserPool(userPoolId, region);
+    const key = `${userPoolId}#${groupName}`;
+    if (this.groups.has(key)) throw new AwsError("GroupExistsException", `A group with the name ${groupName} already exists.`, 400);
+    const now = Date.now() / 1000;
+    const group: UserGroup = {
+      GroupName: groupName,
+      UserPoolId: userPoolId,
+      Description: description,
+      RoleArn: roleArn,
+      Precedence: precedence,
+      CreationDate: now,
+      LastModifiedDate: now,
+    };
+    this.groups.set(key, group);
+    return group;
+  }
+
+  getGroup(userPoolId: string, groupName: string, region: string): UserGroup {
+    this.describeUserPool(userPoolId, region);
+    const key = `${userPoolId}#${groupName}`;
+    const group = this.groups.get(key);
+    if (!group) throw new AwsError("ResourceNotFoundException", `Group not found.`, 400);
+    return group;
+  }
+
+  listGroups(userPoolId: string, region: string, limit?: number): UserGroup[] {
+    this.describeUserPool(userPoolId, region);
+    const groups = this.groups.values().filter((g) => g.UserPoolId === userPoolId);
+    return groups.slice(0, limit ?? 60);
+  }
+
+  deleteGroup(userPoolId: string, groupName: string, region: string): void {
+    this.describeUserPool(userPoolId, region);
+    const key = `${userPoolId}#${groupName}`;
+    if (!this.groups.has(key)) throw new AwsError("ResourceNotFoundException", `Group not found.`, 400);
+    this.groups.delete(key);
+    // Remove all memberships for this group
+    for (const [userKey, groupSet] of this.userGroupMemberships.entries()) {
+      if (userKey.startsWith(`${userPoolId}#`)) {
+        groupSet.delete(groupName);
+      }
+    }
+  }
+
+  updateGroup(userPoolId: string, groupName: string, description: string | undefined, roleArn: string | undefined, precedence: number | undefined, region: string): UserGroup {
+    const group = this.getGroup(userPoolId, groupName, region);
+    if (description !== undefined) group.Description = description;
+    if (roleArn !== undefined) group.RoleArn = roleArn;
+    if (precedence !== undefined) group.Precedence = precedence;
+    group.LastModifiedDate = Date.now() / 1000;
+    return group;
+  }
+
+  adminAddUserToGroup(userPoolId: string, username: string, groupName: string, region: string): void {
+    this.describeUserPool(userPoolId, region);
+    this.getUser(userPoolId, username);
+    this.getGroup(userPoolId, groupName, region);
+    const userKey = `${userPoolId}#${username}`;
+    if (!this.userGroupMemberships.has(userKey)) {
+      this.userGroupMemberships.set(userKey, new Set());
+    }
+    this.userGroupMemberships.get(userKey)!.add(groupName);
+  }
+
+  adminRemoveUserFromGroup(userPoolId: string, username: string, groupName: string, region: string): void {
+    this.describeUserPool(userPoolId, region);
+    this.getUser(userPoolId, username);
+    this.getGroup(userPoolId, groupName, region);
+    const userKey = `${userPoolId}#${username}`;
+    this.userGroupMemberships.get(userKey)?.delete(groupName);
+  }
+
+  adminListGroupsForUser(userPoolId: string, username: string, region: string): UserGroup[] {
+    this.describeUserPool(userPoolId, region);
+    this.getUser(userPoolId, username);
+    const userKey = `${userPoolId}#${username}`;
+    const groupNames = this.userGroupMemberships.get(userKey);
+    if (!groupNames || groupNames.size === 0) return [];
+    return [...groupNames].map((name) => this.groups.get(`${userPoolId}#${name}`)!).filter(Boolean);
+  }
+
+  listUsersInGroup(userPoolId: string, groupName: string, region: string, limit?: number): CognitoUser[] {
+    this.describeUserPool(userPoolId, region);
+    this.getGroup(userPoolId, groupName, region);
+    const users: CognitoUser[] = [];
+    for (const [userKey, groupSet] of this.userGroupMemberships.entries()) {
+      if (userKey.startsWith(`${userPoolId}#`) && groupSet.has(groupName)) {
+        const username = userKey.slice(userPoolId.length + 1);
+        const user = this.users.get(userKey);
+        if (user) users.push(user);
+      }
+    }
+    return users.slice(0, limit ?? 60);
+  }
+
+  createUserPoolDomain(userPoolId: string, domain: string, region: string): UserPoolDomain {
+    this.describeUserPool(userPoolId, region);
+    const key = `${region}#${domain}`;
+    if (this.domains.has(key)) {
+      throw new AwsError("InvalidParameterException", `Domain '${domain}' already exists.`, 400);
+    }
+    const d: UserPoolDomain = {
+      userPoolId,
+      domain,
+      cloudFrontDomain: `${domain}.auth.${region}.amazoncognito.com`,
+      status: "ACTIVE",
+      creationDate: Date.now() / 1000,
+    };
+    this.domains.set(key, d);
+    return d;
+  }
+
+  describeUserPoolDomain(domain: string, region: string): UserPoolDomain {
+    const key = `${region}#${domain}`;
+    const d = this.domains.get(key);
+    if (!d) throw new AwsError("ResourceNotFoundException", `Domain '${domain}' not found.`, 400);
+    return d;
+  }
+
+  deleteUserPoolDomain(userPoolId: string, domain: string, region: string): void {
+    this.describeUserPool(userPoolId, region);
+    const key = `${region}#${domain}`;
+    this.domains.delete(key);
+  }
+
+  createIdentityProvider(
+    userPoolId: string,
+    providerName: string,
+    providerType: string,
+    providerDetails: Record<string, string>,
+    attributeMapping: Record<string, string>,
+    region: string,
+  ): IdentityProvider {
+    this.describeUserPool(userPoolId, region);
+    const key = `${userPoolId}#${providerName}`;
+    if (this.identityProviders.has(key)) {
+      throw new AwsError("DuplicateProviderException", `Provider '${providerName}' already exists.`, 400);
+    }
+    const now = Date.now() / 1000;
+    const idp: IdentityProvider = {
+      userPoolId,
+      providerName,
+      providerType,
+      providerDetails,
+      attributeMapping,
+      creationDate: now,
+      lastModifiedDate: now,
+    };
+    this.identityProviders.set(key, idp);
+    return idp;
+  }
+
+  describeIdentityProvider(userPoolId: string, providerName: string, region: string): IdentityProvider {
+    this.describeUserPool(userPoolId, region);
+    const key = `${userPoolId}#${providerName}`;
+    const idp = this.identityProviders.get(key);
+    if (!idp) throw new AwsError("ResourceNotFoundException", `Identity provider '${providerName}' not found.`, 400);
+    return idp;
+  }
+
+  listIdentityProviders(userPoolId: string, region: string): IdentityProvider[] {
+    this.describeUserPool(userPoolId, region);
+    return this.identityProviders.values().filter((idp) => idp.userPoolId === userPoolId);
+  }
+
+  updateIdentityProvider(
+    userPoolId: string,
+    providerName: string,
+    providerDetails: Record<string, string> | undefined,
+    attributeMapping: Record<string, string> | undefined,
+    region: string,
+  ): IdentityProvider {
+    const idp = this.describeIdentityProvider(userPoolId, providerName, region);
+    if (providerDetails) Object.assign(idp.providerDetails, providerDetails);
+    if (attributeMapping) Object.assign(idp.attributeMapping, attributeMapping);
+    idp.lastModifiedDate = Date.now() / 1000;
+    return idp;
+  }
+
+  deleteIdentityProvider(userPoolId: string, providerName: string, region: string): void {
+    this.describeIdentityProvider(userPoolId, providerName, region); // verify exists
+    const key = `${userPoolId}#${providerName}`;
+    this.identityProviders.delete(key);
   }
 
   private resolveUserFromAccessToken(accessToken: string): { username: string; userPoolId: string } {
@@ -455,6 +684,41 @@ export class CognitoService {
       ExpiresIn: 3600,
       TokenType: "Bearer",
     };
+  }
+
+  private validatePassword(password: string, pool: UserPool): void {
+    const policy = pool.policies?.PasswordPolicy;
+    const minLength = policy?.MinimumLength ?? 8;
+    const requireUpper = policy?.RequireUppercase ?? true;
+    const requireLower = policy?.RequireLowercase ?? true;
+    const requireNumbers = policy?.RequireNumbers ?? true;
+    const requireSymbols = policy?.RequireSymbols ?? true;
+
+    const failures: string[] = [];
+    if (password.length < minLength) {
+      failures.push(`Password must have at least ${minLength} characters`);
+    }
+    if (requireUpper && !/[A-Z]/.test(password)) {
+      failures.push("Password must have uppercase characters");
+    }
+    if (requireLower && !/[a-z]/.test(password)) {
+      failures.push("Password must have lowercase characters");
+    }
+    if (requireNumbers && !/[0-9]/.test(password)) {
+      failures.push("Password must have numeric characters");
+    }
+    if (requireSymbols && !/[^A-Za-z0-9]/.test(password)) {
+      failures.push("Password must have symbol characters");
+    }
+    if (failures.length > 0) {
+      throw new AwsError("InvalidPasswordException", failures.join("; "), 400);
+    }
+  }
+
+  private getPool(userPoolId: string, region: string): UserPool {
+    const pool = this.pools.get(this.regionKey(region, userPoolId));
+    if (!pool) throw new AwsError("ResourceNotFoundException", `User pool ${userPoolId} not found.`, 400);
+    return pool;
   }
 
   private generateJwt(payload: Record<string, any>, region: string, userPoolId: string): string {

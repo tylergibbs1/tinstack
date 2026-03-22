@@ -68,6 +68,63 @@ export class CognitoHandler {
         case "GlobalSignOut":
           this.service.globalSignOut(body.AccessToken);
           return this.json({}, ctx);
+        case "CreateGroup": {
+          const group = this.service.createGroup(body.UserPoolId, body.GroupName, body.Description, body.RoleArn, body.Precedence, ctx.region);
+          return this.json({ Group: group }, ctx);
+        }
+        case "GetGroup": {
+          const group = this.service.getGroup(body.UserPoolId, body.GroupName, ctx.region);
+          return this.json({ Group: group }, ctx);
+        }
+        case "ListGroups":
+          return this.json({ Groups: this.service.listGroups(body.UserPoolId, ctx.region, body.Limit) }, ctx);
+        case "DeleteGroup":
+          this.service.deleteGroup(body.UserPoolId, body.GroupName, ctx.region);
+          return this.json({}, ctx);
+        case "UpdateGroup": {
+          const group = this.service.updateGroup(body.UserPoolId, body.GroupName, body.Description, body.RoleArn, body.Precedence, ctx.region);
+          return this.json({ Group: group }, ctx);
+        }
+        case "AdminAddUserToGroup":
+          this.service.adminAddUserToGroup(body.UserPoolId, body.Username, body.GroupName, ctx.region);
+          return this.json({}, ctx);
+        case "AdminRemoveUserFromGroup":
+          this.service.adminRemoveUserFromGroup(body.UserPoolId, body.Username, body.GroupName, ctx.region);
+          return this.json({}, ctx);
+        case "AdminListGroupsForUser":
+          return this.json({ Groups: this.service.adminListGroupsForUser(body.UserPoolId, body.Username, ctx.region) }, ctx);
+        case "ListUsersInGroup":
+          return this.json({ Users: this.service.listUsersInGroup(body.UserPoolId, body.GroupName, ctx.region, body.Limit).map(userToJson) }, ctx);
+        case "CreateUserPoolDomain": {
+          const domain = this.service.createUserPoolDomain(body.UserPoolId, body.Domain, ctx.region);
+          return this.json({ CloudFrontDomain: domain.cloudFrontDomain }, ctx);
+        }
+        case "DescribeUserPoolDomain": {
+          const domain = this.service.describeUserPoolDomain(body.Domain, ctx.region);
+          return this.json({ DomainDescription: { UserPoolId: domain.userPoolId, Domain: domain.domain, CloudFrontDistribution: domain.cloudFrontDomain, Status: domain.status } }, ctx);
+        }
+        case "DeleteUserPoolDomain":
+          this.service.deleteUserPoolDomain(body.UserPoolId, body.Domain, ctx.region);
+          return this.json({}, ctx);
+        case "CreateIdentityProvider": {
+          const idp = this.service.createIdentityProvider(body.UserPoolId, body.ProviderName, body.ProviderType, body.ProviderDetails ?? {}, body.AttributeMapping ?? {}, ctx.region);
+          return this.json({ IdentityProvider: idpToJson(idp) }, ctx);
+        }
+        case "DescribeIdentityProvider": {
+          const idp = this.service.describeIdentityProvider(body.UserPoolId, body.ProviderName, ctx.region);
+          return this.json({ IdentityProvider: idpToJson(idp) }, ctx);
+        }
+        case "ListIdentityProviders": {
+          const providers = this.service.listIdentityProviders(body.UserPoolId, ctx.region);
+          return this.json({ Providers: providers.map((p) => ({ ProviderName: p.providerName, ProviderType: p.providerType, CreationDate: p.creationDate, LastModifiedDate: p.lastModifiedDate })) }, ctx);
+        }
+        case "UpdateIdentityProvider": {
+          const idp = this.service.updateIdentityProvider(body.UserPoolId, body.ProviderName, body.ProviderDetails, body.AttributeMapping, ctx.region);
+          return this.json({ IdentityProvider: idpToJson(idp) }, ctx);
+        }
+        case "DeleteIdentityProvider":
+          this.service.deleteIdentityProvider(body.UserPoolId, body.ProviderName, ctx.region);
+          return this.json({}, ctx);
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }
@@ -172,5 +229,17 @@ function userToJson(u: any) {
     Username: u.username, Enabled: u.enabled, UserStatus: u.userStatus,
     Attributes: Object.entries(u.attributes).map(([Name, Value]) => ({ Name, Value })),
     UserCreateDate: u.createdDate, UserLastModifiedDate: u.lastModifiedDate,
+  };
+}
+
+function idpToJson(idp: any) {
+  return {
+    UserPoolId: idp.userPoolId,
+    ProviderName: idp.providerName,
+    ProviderType: idp.providerType,
+    ProviderDetails: idp.providerDetails,
+    AttributeMapping: idp.attributeMapping,
+    CreationDate: idp.creationDate,
+    LastModifiedDate: idp.lastModifiedDate,
   };
 }

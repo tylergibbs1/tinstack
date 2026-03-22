@@ -63,11 +63,61 @@ import { SesHandler } from "./services/ses/ses-handler";
 import { AcmService } from "./services/acm/acm-service";
 import { AcmHandler } from "./services/acm/acm-handler";
 
+// Delivery Streams
+import { FirehoseService } from "./services/firehose/firehose-service";
+import { FirehoseHandler } from "./services/firehose/firehose-handler";
+
+// AppConfig
+import { AppConfigService } from "./services/appconfig/appconfig-service";
+import { AppConfigHandler } from "./services/appconfig/appconfig-handler";
+
 // Containers & Load Balancing
 import { EcrService } from "./services/ecr/ecr-service";
 import { EcrHandler } from "./services/ecr/ecr-handler";
 import { Elbv2Service } from "./services/elbv2/elbv2-service";
 import { Elbv2QueryHandler } from "./services/elbv2/elbv2-handler";
+import { EcsServiceImpl } from "./services/ecs/ecs-service";
+import { EcsHandler } from "./services/ecs/ecs-handler";
+
+// Scheduler & CDN
+import { SchedulerService } from "./services/scheduler/scheduler-service";
+import { SchedulerHandler } from "./services/scheduler/scheduler-handler";
+import { CloudFrontService } from "./services/cloudfront/cloudfront-service";
+import { CloudFrontHandler } from "./services/cloudfront/cloudfront-handler";
+
+// CloudFormation
+import { CloudFormationService } from "./services/cloudformation/cloudformation-service";
+import { CloudFormationQueryHandler } from "./services/cloudformation/cloudformation-handler";
+
+// Security & GraphQL
+import { Wafv2Service } from "./services/wafv2/wafv2-service";
+import { Wafv2Handler } from "./services/wafv2/wafv2-handler";
+import { AppSyncService } from "./services/appsync/appsync-service";
+import { AppSyncHandler } from "./services/appsync/appsync-handler";
+
+// Analytics
+import { AthenaService } from "./services/athena/athena-service";
+import { AthenaHandler } from "./services/athena/athena-handler";
+import { GlueService } from "./services/glue/glue-service";
+import { GlueHandler } from "./services/glue/glue-handler";
+
+// Database
+import { RdsService } from "./services/rds/rds-service";
+import { RdsQueryHandler } from "./services/rds/rds-handler";
+
+// Media
+import { MediaConvertService } from "./services/mediaconvert/mediaconvert-service";
+import { MediaConvertHandler } from "./services/mediaconvert/mediaconvert-handler";
+
+// AI & ML
+import { BedrockService } from "./services/bedrock/bedrock-service";
+import { BedrockHandler } from "./services/bedrock/bedrock-handler";
+import { TextractService } from "./services/textract/textract-service";
+import { TextractHandler } from "./services/textract/textract-handler";
+
+// Storage
+import { EfsService } from "./services/efs/efs-service";
+import { EfsHandler } from "./services/efs/efs-handler";
 
 function isEnabled(config: TinstackConfig, serviceName: string): boolean {
   if (config.enabledServices === "*") return true;
@@ -240,11 +290,115 @@ export function createServer(config: TinstackConfig) {
     enabledNames.push("ECR");
   }
 
+  if (isEnabled(config, "firehose")) {
+    jsonRouter.register("firehose", new FirehoseHandler(new FirehoseService(config.defaultAccountId)));
+    enabledNames.push("Firehose");
+  }
+
+  if (isEnabled(config, "ecs")) {
+    jsonRouter.register("ecs", new EcsHandler(new EcsServiceImpl(config.defaultAccountId)));
+    enabledNames.push("ECS");
+  }
+
   if (isEnabled(config, "elasticloadbalancing")) {
     const elbv2Service = new Elbv2Service(config.defaultAccountId);
     const elbv2QueryHandler = new Elbv2QueryHandler(elbv2Service);
     queryRouter.register("elasticloadbalancing", (action, params, ctx) => elbv2QueryHandler.handle(action, params, ctx));
     enabledNames.push("ELBv2");
+  }
+
+  // AppConfig
+  let appConfigHandler: AppConfigHandler | undefined;
+  if (isEnabled(config, "appconfig")) {
+    const appConfigService = new AppConfigService(config.defaultAccountId);
+    appConfigHandler = new AppConfigHandler(appConfigService);
+    enabledNames.push("AppConfig");
+  }
+
+  // Scheduler & CDN
+  let schedulerHandler: SchedulerHandler | undefined;
+  if (isEnabled(config, "scheduler")) {
+    const schedulerService = new SchedulerService(config.defaultAccountId);
+    schedulerHandler = new SchedulerHandler(schedulerService);
+    enabledNames.push("EventBridge Scheduler");
+  }
+
+  let cloudFrontHandler: CloudFrontHandler | undefined;
+  if (isEnabled(config, "cloudfront")) {
+    const cloudFrontService = new CloudFrontService(config.defaultAccountId);
+    cloudFrontHandler = new CloudFrontHandler(cloudFrontService);
+    enabledNames.push("CloudFront");
+  }
+
+  // CloudFormation
+  if (isEnabled(config, "cloudformation")) {
+    const cfnService = new CloudFormationService(config.defaultAccountId);
+    const cfnQueryHandler = new CloudFormationQueryHandler(cfnService);
+    queryRouter.register("cloudformation", (action, params, ctx) => cfnQueryHandler.handle(action, params, ctx));
+    enabledNames.push("CloudFormation");
+  }
+
+  // WAFv2 (JSON 1.1)
+  if (isEnabled(config, "wafv2")) {
+    jsonRouter.register("wafv2", new Wafv2Handler(new Wafv2Service(config.defaultAccountId)));
+    enabledNames.push("WAFv2");
+  }
+
+  // AppSync (REST-style)
+  let appSyncHandler: AppSyncHandler | undefined;
+  if (isEnabled(config, "appsync")) {
+    const appSyncService = new AppSyncService(config.defaultAccountId);
+    appSyncHandler = new AppSyncHandler(appSyncService);
+    enabledNames.push("AppSync");
+  }
+
+  // RDS (Query/XML)
+  if (isEnabled(config, "rds")) {
+    const rdsService = new RdsService(config.defaultAccountId, config.defaultRegion);
+    const rdsQueryHandler = new RdsQueryHandler(rdsService);
+    queryRouter.register("rds", (action, params, ctx) => rdsQueryHandler.handle(action, params, ctx));
+    enabledNames.push("RDS");
+  }
+
+  // MediaConvert (REST-style)
+  let mediaConvertHandler: MediaConvertHandler | undefined;
+  if (isEnabled(config, "mediaconvert")) {
+    const mediaConvertService = new MediaConvertService(config.defaultAccountId, config.baseUrl);
+    mediaConvertHandler = new MediaConvertHandler(mediaConvertService);
+    enabledNames.push("MediaConvert");
+  }
+
+  // AI & ML
+  let bedrockHandler: BedrockHandler | undefined;
+  if (isEnabled(config, "bedrock")) {
+    const bedrockService = new BedrockService(config.defaultAccountId);
+    bedrockHandler = new BedrockHandler(bedrockService);
+    jsonRouter.register("bedrock", bedrockHandler);
+    enabledNames.push("Bedrock");
+  }
+
+  if (isEnabled(config, "textract")) {
+    jsonRouter.register("textract", new TextractHandler(new TextractService()));
+    enabledNames.push("Textract");
+  }
+
+  // EFS (REST-style)
+  let efsHandler: EfsHandler | undefined;
+  if (isEnabled(config, "elasticfilesystem")) {
+    const efsService = new EfsService(config.defaultAccountId);
+    efsHandler = new EfsHandler(efsService);
+    enabledNames.push("EFS");
+  }
+
+  // Analytics
+  if (isEnabled(config, "athena")) {
+    jsonRouter.register("athena", new AthenaHandler(new AthenaService(config.defaultAccountId)));
+    enabledNames.push("Athena");
+  }
+
+  if (isEnabled(config, "glue")) {
+    jsonRouter.register("glue", new GlueHandler(new GlueService(config.defaultAccountId)));
+    enabledNames.push("Glue");
   }
 
   const s3Router = (globalThis as any).__tinstackS3Router as S3Router | undefined;
@@ -296,7 +450,7 @@ export function createServer(config: TinstackConfig) {
         // REST-style services (Lambda, API Gateway) — route by path prefix
         const pathname = new URL(req.url).pathname;
 
-        if (lambdaHandler && (pathname.startsWith("/2015-03-31/functions") || pathname.startsWith("/2015-03-31/event-source-mappings") || pathname.startsWith("/2019-09-25/tags") || pathname.startsWith("/2020-06-30/functions"))) {
+        if (lambdaHandler && (pathname.startsWith("/2015-03-31/functions") || pathname.startsWith("/2015-03-31/event-source-mappings") || pathname.startsWith("/2015-03-31/layers") || pathname.startsWith("/2018-10-31/layers") || pathname.startsWith("/2019-09-25/tags") || pathname.startsWith("/2020-06-30/functions"))) {
           const response = await lambdaHandler.handleRoute(req, ctx);
           logRequest(req, response, startTime);
           return response;
@@ -316,6 +470,48 @@ export function createServer(config: TinstackConfig) {
 
         if (sesHandler && pathname.startsWith("/v2/email/")) {
           const response = await sesHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        if (appConfigHandler && pathname.startsWith("/applications")) {
+          const response = await appConfigHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        if (schedulerHandler && (pathname.startsWith("/schedules") || pathname.startsWith("/schedule-groups") || pathname.startsWith("/tags/"))) {
+          const response = await schedulerHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        if (cloudFrontHandler && pathname.startsWith("/2020-05-31/distribution")) {
+          const response = await cloudFrontHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        if (appSyncHandler && pathname.startsWith("/v1/apis")) {
+          const response = await appSyncHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        if (bedrockHandler && (pathname.startsWith("/model/") || pathname === "/foundation-models")) {
+          const response = await bedrockHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        if (efsHandler && pathname.startsWith("/2015-02-01/")) {
+          const response = await efsHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        if (mediaConvertHandler && pathname.startsWith("/2017-08-29/")) {
+          const response = await mediaConvertHandler.handleRoute(req, ctx);
           logRequest(req, response, startTime);
           return response;
         }

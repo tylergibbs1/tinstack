@@ -1,4 +1,7 @@
 export class AwsError extends Error {
+  deleteMarker?: boolean;
+  versionId?: string;
+
   constructor(
     public readonly code: string,
     message: string,
@@ -22,7 +25,7 @@ export function jsonErrorResponse(err: AwsError, requestId: string): Response {
   );
 }
 
-export function xmlErrorResponse(err: AwsError, requestId: string): Response {
+export function xmlErrorResponse(err: AwsError, requestId: string, extraHeaders?: Record<string, string>): Response {
   const body = `<?xml version="1.0" encoding="UTF-8"?>
 <ErrorResponse>
   <Error>
@@ -33,7 +36,7 @@ export function xmlErrorResponse(err: AwsError, requestId: string): Response {
 </ErrorResponse>`;
   return new Response(body, {
     status: err.statusCode,
-    headers: { "Content-Type": "application/xml", "x-amzn-RequestId": requestId },
+    headers: { "Content-Type": "application/xml", "x-amzn-RequestId": requestId, ...extraHeaders },
   });
 }
 

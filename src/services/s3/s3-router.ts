@@ -37,17 +37,19 @@ export class S3Router {
           if (params.has("tagging")) return this.getBucketTagging(bucket, ctx);
           if (params.has("policy")) return this.getBucketPolicy(bucket, ctx);
           if (params.has("cors")) return this.getBucketCors(bucket, ctx);
-          if (params.has("encryption")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><ServerSideEncryptionConfiguration xmlns="${ns}"><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>false</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`, ctx);
+          if (params.has("encryption")) return this.getBucketEncryption(bucket, ctx);
+          if (params.has("notification")) return this.getBucketNotificationConfiguration(bucket, ctx);
+          if (params.has("versions")) return this.listObjectVersions(bucket, params, ctx);
           if (params.has("acl")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><AccessControlPolicy xmlns="${ns}"><Owner><ID>000000000000</ID><DisplayName>tinstack</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>000000000000</ID><DisplayName>tinstack</DisplayName></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>`, ctx);
-          if (params.has("logging")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><BucketLoggingStatus xmlns="${ns}"/>`, ctx);
-          if (params.has("website")) return this.s3Error("NoSuchWebsiteConfiguration", "The specified bucket does not have a website configuration", 404, ctx);
+          if (params.has("logging")) return this.getBucketLogging(bucket, ctx);
+          if (params.has("website")) return this.getBucketWebsite(bucket, ctx);
           if (params.has("replication")) return this.s3Error("ReplicationConfigurationNotFoundError", "The replication configuration was not found", 404, ctx);
           if (params.has("request-payment")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><RequestPaymentConfiguration xmlns="${ns}"><Payer>BucketOwner</Payer></RequestPaymentConfiguration>`, ctx);
-          if (params.has("object-lock")) return this.s3Error("ObjectLockConfigurationNotFoundError", "Object Lock configuration does not exist for this bucket", 404, ctx);
+          if (params.has("object-lock")) return this.getObjectLockConfiguration(bucket, ctx);
           if (params.has("ownershipControls")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><OwnershipControls xmlns="${ns}"><Rule><ObjectOwnership>BucketOwnerEnforced</ObjectOwnership></Rule></OwnershipControls>`, ctx);
-          if (params.has("publicAccessBlock")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><PublicAccessBlockConfiguration xmlns="${ns}"><BlockPublicAcls>false</BlockPublicAcls><IgnorePublicAcls>false</IgnorePublicAcls><BlockPublicPolicy>false</BlockPublicPolicy><RestrictPublicBuckets>false</RestrictPublicBuckets></PublicAccessBlockConfiguration>`, ctx);
+          if (params.has("publicAccessBlock")) return this.getPublicAccessBlock(bucket, ctx);
           if (params.has("accelerate")) return this.xml(`<?xml version="1.0" encoding="UTF-8"?><AccelerateConfiguration xmlns="${ns}"/>`, ctx);
-          if (params.has("lifecycle")) return this.s3Error("NoSuchLifecycleConfiguration", "The lifecycle configuration does not exist", 404, ctx);
+          if (params.has("lifecycle")) return this.getBucketLifecycleConfiguration(bucket, ctx);
         }
 
         // Bucket sub-resource PUT handlers
@@ -56,8 +58,14 @@ export class S3Router {
           if (params.has("tagging")) return this.putBucketTagging(bucket, req, ctx);
           if (params.has("policy")) return this.putBucketPolicy(bucket, req, ctx);
           if (params.has("cors")) return this.putBucketCors(bucket, req, ctx);
-          if (params.has("encryption") || params.has("acl") ||
-              params.has("logging") || params.has("publicAccessBlock") || params.has("ownershipControls")) {
+          if (params.has("lifecycle")) return this.putBucketLifecycleConfiguration(bucket, req, ctx);
+          if (params.has("encryption")) return this.putBucketEncryption(bucket, req, ctx);
+          if (params.has("notification")) return this.putBucketNotificationConfiguration(bucket, req, ctx);
+          if (params.has("website")) return this.putBucketWebsite(bucket, req, ctx);
+          if (params.has("publicAccessBlock")) return this.putPublicAccessBlock(bucket, req, ctx);
+          if (params.has("logging")) return this.putBucketLogging(bucket, req, ctx);
+          if (params.has("object-lock")) return this.putObjectLockConfiguration(bucket, req, ctx);
+          if (params.has("acl") || params.has("ownershipControls")) {
             return new Response(null, { status: 200, headers: { "x-amz-request-id": ctx.requestId } });
           }
         }
@@ -67,7 +75,11 @@ export class S3Router {
           if (params.has("policy")) { this.service.deleteBucketPolicy(bucket); return new Response(null, { status: 204, headers: { "x-amz-request-id": ctx.requestId } }); }
           if (params.has("cors")) { this.service.deleteBucketCors(bucket); return new Response(null, { status: 204, headers: { "x-amz-request-id": ctx.requestId } }); }
           if (params.has("tagging")) { this.service.deleteBucketTagging(bucket); return new Response(null, { status: 204, headers: { "x-amz-request-id": ctx.requestId } }); }
-          if (params.has("encryption") || params.has("publicAccessBlock") || params.has("ownershipControls")) {
+          if (params.has("lifecycle")) { this.service.deleteBucketLifecycle(bucket); return new Response(null, { status: 204, headers: { "x-amz-request-id": ctx.requestId } }); }
+          if (params.has("encryption")) { this.service.deleteBucketEncryption(bucket); return new Response(null, { status: 204, headers: { "x-amz-request-id": ctx.requestId } }); }
+          if (params.has("website")) { this.service.deleteBucketWebsite(bucket); return new Response(null, { status: 204, headers: { "x-amz-request-id": ctx.requestId } }); }
+          if (params.has("publicAccessBlock")) { this.service.deletePublicAccessBlock(bucket); return new Response(null, { status: 204, headers: { "x-amz-request-id": ctx.requestId } }); }
+          if (params.has("ownershipControls")) {
             return new Response(null, { status: 204, headers: { "x-amz-request-id": ctx.requestId } });
           }
         }
@@ -86,11 +98,34 @@ export class S3Router {
 
       // Object-level operations
       if (bucket && key) {
+        // Object retention
+        if (params.has("retention")) {
+          if (method === "GET") return this.getObjectRetention(bucket, key, ctx);
+          if (method === "PUT") return this.putObjectRetention(bucket, key, req, ctx);
+        }
+
+        // Object legal hold
+        if (params.has("legal-hold")) {
+          if (method === "GET") return this.getObjectLegalHold(bucket, key, ctx);
+          if (method === "PUT") return this.putObjectLegalHold(bucket, key, req, ctx);
+        }
+
+        // Object attributes
+        if (params.has("attributes") && method === "GET") {
+          return this.getObjectAttributes(bucket, key, req, ctx);
+        }
+
         // Object tagging
         if (params.has("tagging")) {
           if (method === "GET") return this.getObjectTagging(bucket, key, ctx);
           if (method === "PUT") return this.putObjectTagging(bucket, key, req, ctx);
           if (method === "DELETE") return this.deleteObjectTagging(bucket, key, ctx);
+        }
+
+        // Object ACL
+        if (params.has("acl")) {
+          if (method === "GET") return this.getObjectAcl(bucket, key, ctx);
+          if (method === "PUT") return this.putObjectAcl(bucket, key, req, ctx);
         }
 
         // Multipart upload operations
@@ -117,11 +152,11 @@ export class S3Router {
             return this.putObject(bucket, key, req, ctx);
           }
           case "GET":
-            return this.getObject(bucket, key, ctx);
+            return this.getObject(bucket, key, params, ctx);
           case "HEAD":
-            return this.headObject(bucket, key, ctx);
+            return this.headObject(bucket, key, params, ctx);
           case "DELETE":
-            return this.deleteObject(bucket, key, ctx);
+            return this.deleteObject(bucket, key, params, ctx);
         }
       }
 
@@ -309,39 +344,70 @@ export class S3Router {
     });
   }
 
-  private getObject(bucket: string, key: string, ctx: RequestContext): Response {
-    const obj = this.service.getObject(bucket, key);
-    const headers: Record<string, string> = {
-      "Content-Type": obj.contentType,
-      "Content-Length": String(obj.contentLength),
-      ETag: obj.etag,
-      "Last-Modified": obj.lastModified,
-      "x-amz-request-id": ctx.requestId,
-    };
-    for (const [k, v] of Object.entries(obj.metadata)) {
-      headers[`x-amz-meta-${k}`] = v;
+  private getObject(bucket: string, key: string, params: URLSearchParams, ctx: RequestContext): Response {
+    const versionId = params.get("versionId") ?? undefined;
+    try {
+      const obj = this.service.getObject(bucket, key, versionId);
+      const headers: Record<string, string> = {
+        "Content-Type": obj.contentType,
+        "Content-Length": String(obj.contentLength),
+        ETag: obj.etag,
+        "Last-Modified": obj.lastModified,
+        "x-amz-request-id": ctx.requestId,
+      };
+      for (const [k, v] of Object.entries(obj.metadata)) {
+        headers[`x-amz-meta-${k}`] = v;
+      }
+      return new Response(obj.data, { status: 200, headers });
+    } catch (e: any) {
+      if (e instanceof AwsError && e.deleteMarker) {
+        return xmlErrorResponse(
+          e,
+          ctx.requestId,
+          { "x-amz-delete-marker": "true", "x-amz-version-id": e.versionId ?? "" },
+        );
+      }
+      throw e;
     }
-    return new Response(obj.data, { status: 200, headers });
   }
 
-  private headObject(bucket: string, key: string, ctx: RequestContext): Response {
-    const obj = this.service.headObject(bucket, key);
-    const headers: Record<string, string> = {
-      "Content-Type": obj.contentType,
-      "Content-Length": String(obj.contentLength),
-      ETag: obj.etag,
-      "Last-Modified": obj.lastModified,
-      "x-amz-request-id": ctx.requestId,
-    };
-    for (const [k, v] of Object.entries(obj.metadata)) {
-      headers[`x-amz-meta-${k}`] = v;
+  private headObject(bucket: string, key: string, params: URLSearchParams, ctx: RequestContext): Response {
+    const versionId = params.get("versionId") ?? undefined;
+    try {
+      const obj = this.service.headObject(bucket, key, versionId);
+      const headers: Record<string, string> = {
+        "Content-Type": obj.contentType,
+        "Content-Length": String(obj.contentLength),
+        ETag: obj.etag,
+        "Last-Modified": obj.lastModified,
+        "x-amz-request-id": ctx.requestId,
+      };
+      for (const [k, v] of Object.entries(obj.metadata)) {
+        headers[`x-amz-meta-${k}`] = v;
+      }
+      return new Response(null, { status: 200, headers });
+    } catch (e: any) {
+      if (e instanceof AwsError && e.deleteMarker) {
+        return new Response(null, {
+          status: 404,
+          headers: {
+            "x-amz-delete-marker": "true",
+            "x-amz-version-id": e.versionId ?? "",
+            "x-amz-request-id": ctx.requestId,
+          },
+        });
+      }
+      throw e;
     }
-    return new Response(null, { status: 200, headers });
   }
 
-  private deleteObject(bucket: string, key: string, ctx: RequestContext): Response {
-    this.service.deleteObject(bucket, key);
-    return new Response(null, { status: 204, headers: { "x-amz-request-id": ctx.requestId } });
+  private deleteObject(bucket: string, key: string, params: URLSearchParams, ctx: RequestContext): Response {
+    const versionId = params.get("versionId") ?? undefined;
+    const result = this.service.deleteObject(bucket, key, versionId);
+    const headers: Record<string, string> = { "x-amz-request-id": ctx.requestId };
+    if (result.deleteMarker) headers["x-amz-delete-marker"] = "true";
+    if (result.versionId) headers["x-amz-version-id"] = result.versionId;
+    return new Response(null, { status: 204, headers });
   }
 
   private async deleteObjects(bucket: string, req: Request, ctx: RequestContext): Promise<Response> {
@@ -590,9 +656,608 @@ export class S3Router {
     return new Response(null, { status: 204, headers: { "x-amz-request-id": ctx.requestId } });
   }
 
+  // Bucket Lifecycle Configuration
+  private getBucketLifecycleConfiguration(bucket: string, ctx: RequestContext): Response {
+    try {
+      const rules = this.service.getBucketLifecycleConfiguration(bucket);
+      const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+      const xml = new XmlBuilder().start("LifecycleConfiguration", { xmlns: ns });
+      for (const rule of rules) {
+        xml.start("Rule");
+        if (rule.ID) xml.elem("ID", rule.ID);
+        if (rule.Prefix !== undefined) xml.elem("Prefix", rule.Prefix);
+        if (rule.Filter) {
+          xml.start("Filter");
+          if (rule.Filter.Prefix !== undefined) xml.elem("Prefix", rule.Filter.Prefix);
+          xml.end("Filter");
+        }
+        xml.elem("Status", rule.Status ?? "Enabled");
+        if (rule.Transitions) {
+          for (const t of rule.Transitions) {
+            xml.start("Transition");
+            if (t.Days !== undefined) xml.elem("Days", t.Days);
+            if (t.Date) xml.elem("Date", t.Date);
+            if (t.StorageClass) xml.elem("StorageClass", t.StorageClass);
+            xml.end("Transition");
+          }
+        }
+        if (rule.Expiration) {
+          xml.start("Expiration");
+          if (rule.Expiration.Days !== undefined) xml.elem("Days", rule.Expiration.Days);
+          if (rule.Expiration.Date) xml.elem("Date", rule.Expiration.Date);
+          if (rule.Expiration.ExpiredObjectDeleteMarker !== undefined) xml.elem("ExpiredObjectDeleteMarker", rule.Expiration.ExpiredObjectDeleteMarker);
+          xml.end("Expiration");
+        }
+        if (rule.NoncurrentVersionExpiration) {
+          xml.start("NoncurrentVersionExpiration");
+          if (rule.NoncurrentVersionExpiration.NoncurrentDays !== undefined) xml.elem("NoncurrentDays", rule.NoncurrentVersionExpiration.NoncurrentDays);
+          xml.end("NoncurrentVersionExpiration");
+        }
+        xml.end("Rule");
+      }
+      xml.end("LifecycleConfiguration");
+      return this.xml(`<?xml version="1.0" encoding="UTF-8"?>${xml.build()}`, ctx);
+    } catch (e) {
+      if (e instanceof AwsError) return xmlErrorResponse(e, ctx.requestId);
+      throw e;
+    }
+  }
+
+  private async putBucketLifecycleConfiguration(bucket: string, req: Request, ctx: RequestContext): Promise<Response> {
+    const body = await req.text();
+    const rules: any[] = [];
+    const ruleRegex = /<Rule>([\s\S]*?)<\/Rule>/g;
+    let match;
+    while ((match = ruleRegex.exec(body)) !== null) {
+      const ruleXml = match[1];
+      const rule: any = {};
+      const id = ruleXml.match(/<ID>([^<]*)<\/ID>/);
+      if (id) rule.ID = id[1];
+      const prefix = ruleXml.match(/<Prefix>([^<]*)<\/Prefix>/);
+      if (prefix) rule.Prefix = prefix[1];
+      // Filter
+      const filterMatch = ruleXml.match(/<Filter>([\s\S]*?)<\/Filter>/);
+      if (filterMatch) {
+        rule.Filter = {};
+        const fp = filterMatch[1].match(/<Prefix>([^<]*)<\/Prefix>/);
+        if (fp) rule.Filter.Prefix = fp[1];
+      }
+      const status = ruleXml.match(/<Status>([^<]+)<\/Status>/);
+      if (status) rule.Status = status[1];
+      // Transitions
+      const transitions: any[] = [];
+      const transRegex = /<Transition>([\s\S]*?)<\/Transition>/g;
+      let tm;
+      while ((tm = transRegex.exec(ruleXml)) !== null) {
+        const t: any = {};
+        const days = tm[1].match(/<Days>(\d+)<\/Days>/);
+        if (days) t.Days = parseInt(days[1]);
+        const date = tm[1].match(/<Date>([^<]+)<\/Date>/);
+        if (date) t.Date = date[1];
+        const sc = tm[1].match(/<StorageClass>([^<]+)<\/StorageClass>/);
+        if (sc) t.StorageClass = sc[1];
+        transitions.push(t);
+      }
+      if (transitions.length) rule.Transitions = transitions;
+      // Expiration
+      const expMatch = ruleXml.match(/<Expiration>([\s\S]*?)<\/Expiration>/);
+      if (expMatch) {
+        rule.Expiration = {};
+        const days = expMatch[1].match(/<Days>(\d+)<\/Days>/);
+        if (days) rule.Expiration.Days = parseInt(days[1]);
+        const date = expMatch[1].match(/<Date>([^<]+)<\/Date>/);
+        if (date) rule.Expiration.Date = date[1];
+      }
+      // NoncurrentVersionExpiration
+      const nveMatch = ruleXml.match(/<NoncurrentVersionExpiration>([\s\S]*?)<\/NoncurrentVersionExpiration>/);
+      if (nveMatch) {
+        rule.NoncurrentVersionExpiration = {};
+        const days = nveMatch[1].match(/<NoncurrentDays>(\d+)<\/NoncurrentDays>/);
+        if (days) rule.NoncurrentVersionExpiration.NoncurrentDays = parseInt(days[1]);
+      }
+      rules.push(rule);
+    }
+    this.service.putBucketLifecycleConfiguration(bucket, rules);
+    return new Response(null, { status: 200, headers: { "x-amz-request-id": ctx.requestId } });
+  }
+
+  // Bucket Encryption
+  private getBucketEncryption(bucket: string, ctx: RequestContext): Response {
+    try {
+      const config = this.service.getBucketEncryption(bucket);
+      const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+      const xml = new XmlBuilder().start("ServerSideEncryptionConfiguration", { xmlns: ns });
+      for (const rule of config.rules ?? [config]) {
+        xml.start("Rule").start("ApplyServerSideEncryptionByDefault");
+        xml.elem("SSEAlgorithm", rule.SSEAlgorithm ?? "AES256");
+        if (rule.KMSMasterKeyID) xml.elem("KMSMasterKeyID", rule.KMSMasterKeyID);
+        xml.end("ApplyServerSideEncryptionByDefault");
+        xml.elem("BucketKeyEnabled", rule.BucketKeyEnabled ?? false);
+        xml.end("Rule");
+      }
+      xml.end("ServerSideEncryptionConfiguration");
+      return this.xml(`<?xml version="1.0" encoding="UTF-8"?>${xml.build()}`, ctx);
+    } catch (e) {
+      if (e instanceof AwsError) {
+        // Return default AES256 if no config is set (matches AWS behavior for new buckets)
+        const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+        return this.xml(`<?xml version="1.0" encoding="UTF-8"?><ServerSideEncryptionConfiguration xmlns="${ns}"><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>false</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`, ctx);
+      }
+      throw e;
+    }
+  }
+
+  private async putBucketEncryption(bucket: string, req: Request, ctx: RequestContext): Promise<Response> {
+    const body = await req.text();
+    const rules: any[] = [];
+    const ruleRegex = /<Rule>([\s\S]*?)<\/Rule>/g;
+    let match;
+    while ((match = ruleRegex.exec(body)) !== null) {
+      const ruleXml = match[1];
+      const rule: any = {};
+      const algo = ruleXml.match(/<SSEAlgorithm>([^<]+)<\/SSEAlgorithm>/);
+      if (algo) rule.SSEAlgorithm = algo[1];
+      const kmsKey = ruleXml.match(/<KMSMasterKeyID>([^<]+)<\/KMSMasterKeyID>/);
+      if (kmsKey) rule.KMSMasterKeyID = kmsKey[1];
+      const bke = ruleXml.match(/<BucketKeyEnabled>([^<]+)<\/BucketKeyEnabled>/);
+      if (bke) rule.BucketKeyEnabled = bke[1] === "true";
+      rules.push(rule);
+    }
+    this.service.putBucketEncryption(bucket, { rules });
+    return new Response(null, { status: 200, headers: { "x-amz-request-id": ctx.requestId } });
+  }
+
+  // List Object Versions
+  private listObjectVersions(bucket: string, params: URLSearchParams, ctx: RequestContext): Response {
+    const prefix = params.get("prefix") ?? "";
+    const delimiter = params.get("delimiter") ?? "";
+    const maxKeys = parseInt(params.get("max-keys") ?? "1000");
+    const keyMarker = params.get("key-marker") ?? undefined;
+
+    const result = this.service.listObjectVersions(bucket, prefix, delimiter, maxKeys, keyMarker);
+    const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+    const xml = new XmlBuilder()
+      .start("ListVersionsResult", { xmlns: ns })
+      .elem("Name", bucket)
+      .elem("Prefix", prefix)
+      .elem("MaxKeys", maxKeys)
+      .elem("IsTruncated", result.isTruncated);
+
+    if (delimiter) xml.elem("Delimiter", delimiter);
+    if (keyMarker) xml.elem("KeyMarker", keyMarker);
+    if (result.nextKeyMarker) xml.elem("NextKeyMarker", result.nextKeyMarker);
+
+    for (const v of result.versions) {
+      xml.start("Version")
+        .elem("Key", v.key)
+        .elem("VersionId", v.versionId)
+        .elem("IsLatest", v.isLatest)
+        .elem("LastModified", v.lastModified)
+        .elem("Size", v.size)
+        .elem("ETag", v.etag)
+        .elem("StorageClass", "STANDARD")
+        .end("Version");
+    }
+
+    for (const cp of result.commonPrefixes) {
+      xml.start("CommonPrefixes").elem("Prefix", cp).end("CommonPrefixes");
+    }
+
+    xml.end("ListVersionsResult");
+    return this.xml(`<?xml version="1.0" encoding="UTF-8"?>${xml.build()}`, ctx);
+  }
+
+  // Bucket Notification Configuration
+  private getBucketNotificationConfiguration(bucket: string, ctx: RequestContext): Response {
+    const config = this.service.getBucketNotificationConfiguration(bucket);
+    const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+    const xml = new XmlBuilder().start("NotificationConfiguration", { xmlns: ns });
+    if (config.LambdaFunctionConfigurations) {
+      for (const c of config.LambdaFunctionConfigurations) {
+        xml.start("CloudFunctionConfiguration");
+        if (c.Id) xml.elem("Id", c.Id);
+        if (c.LambdaFunctionArn) xml.elem("CloudFunction", c.LambdaFunctionArn);
+        if (c.Events) for (const e of c.Events) xml.elem("Event", e);
+        xml.end("CloudFunctionConfiguration");
+      }
+    }
+    if (config.QueueConfigurations) {
+      for (const c of config.QueueConfigurations) {
+        xml.start("QueueConfiguration");
+        if (c.Id) xml.elem("Id", c.Id);
+        if (c.QueueArn) xml.elem("Queue", c.QueueArn);
+        if (c.Events) for (const e of c.Events) xml.elem("Event", e);
+        xml.end("QueueConfiguration");
+      }
+    }
+    if (config.TopicConfigurations) {
+      for (const c of config.TopicConfigurations) {
+        xml.start("TopicConfiguration");
+        if (c.Id) xml.elem("Id", c.Id);
+        if (c.TopicArn) xml.elem("Topic", c.TopicArn);
+        if (c.Events) for (const e of c.Events) xml.elem("Event", e);
+        xml.end("TopicConfiguration");
+      }
+    }
+    xml.end("NotificationConfiguration");
+    return this.xml(`<?xml version="1.0" encoding="UTF-8"?>${xml.build()}`, ctx);
+  }
+
+  private async putBucketNotificationConfiguration(bucket: string, req: Request, ctx: RequestContext): Promise<Response> {
+    const body = await req.text();
+    const config: any = {};
+    // Parse Lambda configurations
+    const lambdaRegex = /<CloudFunctionConfiguration>([\s\S]*?)<\/CloudFunctionConfiguration>/g;
+    let match;
+    const lambdas: any[] = [];
+    while ((match = lambdaRegex.exec(body)) !== null) {
+      const c: any = {};
+      const id = match[1].match(/<Id>([^<]*)<\/Id>/);
+      if (id) c.Id = id[1];
+      const arn = match[1].match(/<CloudFunction>([^<]+)<\/CloudFunction>/);
+      if (arn) c.LambdaFunctionArn = arn[1];
+      const events = [...match[1].matchAll(/<Event>([^<]+)<\/Event>/g)].map(m => m[1]);
+      if (events.length) c.Events = events;
+      lambdas.push(c);
+    }
+    if (lambdas.length) config.LambdaFunctionConfigurations = lambdas;
+    // Parse Queue configurations
+    const queueRegex = /<QueueConfiguration>([\s\S]*?)<\/QueueConfiguration>/g;
+    const queues: any[] = [];
+    while ((match = queueRegex.exec(body)) !== null) {
+      const c: any = {};
+      const id = match[1].match(/<Id>([^<]*)<\/Id>/);
+      if (id) c.Id = id[1];
+      const arn = match[1].match(/<Queue>([^<]+)<\/Queue>/);
+      if (arn) c.QueueArn = arn[1];
+      const events = [...match[1].matchAll(/<Event>([^<]+)<\/Event>/g)].map(m => m[1]);
+      if (events.length) c.Events = events;
+      queues.push(c);
+    }
+    if (queues.length) config.QueueConfigurations = queues;
+    // Parse Topic configurations
+    const topicRegex = /<TopicConfiguration>([\s\S]*?)<\/TopicConfiguration>/g;
+    const topics: any[] = [];
+    while ((match = topicRegex.exec(body)) !== null) {
+      const c: any = {};
+      const id = match[1].match(/<Id>([^<]*)<\/Id>/);
+      if (id) c.Id = id[1];
+      const arn = match[1].match(/<Topic>([^<]+)<\/Topic>/);
+      if (arn) c.TopicArn = arn[1];
+      const events = [...match[1].matchAll(/<Event>([^<]+)<\/Event>/g)].map(m => m[1]);
+      if (events.length) c.Events = events;
+      topics.push(c);
+    }
+    if (topics.length) config.TopicConfigurations = topics;
+    this.service.putBucketNotificationConfiguration(bucket, config);
+    return new Response(null, { status: 200, headers: { "x-amz-request-id": ctx.requestId } });
+  }
+
+  // Object ACL
+  private getObjectAcl(bucket: string, key: string, ctx: RequestContext): Response {
+    const acl = this.service.getObjectAcl(bucket, key);
+    const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+    const xml = new XmlBuilder().start("AccessControlPolicy", { xmlns: ns });
+    xml.start("Owner")
+      .elem("ID", acl.owner.id)
+      .elem("DisplayName", acl.owner.displayName)
+      .end("Owner");
+    xml.start("AccessControlList");
+    for (const grant of acl.grants) {
+      xml.start("Grant");
+      xml.raw(`<Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="${grant.grantee.type}">`);
+      xml.elem("ID", grant.grantee.id);
+      xml.elem("DisplayName", grant.grantee.displayName);
+      xml.raw("</Grantee>");
+      xml.elem("Permission", grant.permission);
+      xml.end("Grant");
+    }
+    xml.end("AccessControlList").end("AccessControlPolicy");
+    return this.xml(`<?xml version="1.0" encoding="UTF-8"?>${xml.build()}`, ctx);
+  }
+
+  private async putObjectAcl(bucket: string, key: string, req: Request, ctx: RequestContext): Promise<Response> {
+    // Accept the ACL but store a simplified version
+    const cannedAcl = req.headers.get("x-amz-acl");
+    const acl = {
+      owner: { id: "000000000000", displayName: "tinstack" },
+      grants: [{ grantee: { id: "000000000000", displayName: "tinstack", type: "CanonicalUser" }, permission: cannedAcl === "public-read" ? "READ" : "FULL_CONTROL" }],
+    };
+    this.service.putObjectAcl(bucket, key, acl);
+    return new Response(null, { status: 200, headers: { "x-amz-request-id": ctx.requestId } });
+  }
+
+  // Website Configuration
+  private getBucketWebsite(bucket: string, ctx: RequestContext): Response {
+    try {
+      const config = this.service.getBucketWebsite(bucket);
+      const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+      const xml = new XmlBuilder().start("WebsiteConfiguration", { xmlns: ns });
+      if (config.RedirectAllRequestsTo) {
+        xml.start("RedirectAllRequestsTo");
+        xml.elem("HostName", config.RedirectAllRequestsTo.HostName);
+        if (config.RedirectAllRequestsTo.Protocol) xml.elem("Protocol", config.RedirectAllRequestsTo.Protocol);
+        xml.end("RedirectAllRequestsTo");
+      }
+      if (config.IndexDocument) {
+        xml.start("IndexDocument").elem("Suffix", config.IndexDocument.Suffix).end("IndexDocument");
+      }
+      if (config.ErrorDocument) {
+        xml.start("ErrorDocument").elem("Key", config.ErrorDocument.Key).end("ErrorDocument");
+      }
+      if (config.RoutingRules) {
+        xml.start("RoutingRules");
+        for (const rule of config.RoutingRules) {
+          xml.start("RoutingRule");
+          if (rule.Condition) {
+            xml.start("Condition");
+            if (rule.Condition.KeyPrefixEquals) xml.elem("KeyPrefixEquals", rule.Condition.KeyPrefixEquals);
+            if (rule.Condition.HttpErrorCodeReturnedEquals) xml.elem("HttpErrorCodeReturnedEquals", rule.Condition.HttpErrorCodeReturnedEquals);
+            xml.end("Condition");
+          }
+          if (rule.Redirect) {
+            xml.start("Redirect");
+            if (rule.Redirect.HostName) xml.elem("HostName", rule.Redirect.HostName);
+            if (rule.Redirect.Protocol) xml.elem("Protocol", rule.Redirect.Protocol);
+            if (rule.Redirect.ReplaceKeyPrefixWith) xml.elem("ReplaceKeyPrefixWith", rule.Redirect.ReplaceKeyPrefixWith);
+            if (rule.Redirect.ReplaceKeyWith) xml.elem("ReplaceKeyWith", rule.Redirect.ReplaceKeyWith);
+            if (rule.Redirect.HttpRedirectCode) xml.elem("HttpRedirectCode", rule.Redirect.HttpRedirectCode);
+            xml.end("Redirect");
+          }
+          xml.end("RoutingRule");
+        }
+        xml.end("RoutingRules");
+      }
+      xml.end("WebsiteConfiguration");
+      return this.xml(`<?xml version="1.0" encoding="UTF-8"?>${xml.build()}`, ctx);
+    } catch (e) {
+      if (e instanceof AwsError) return xmlErrorResponse(e, ctx.requestId);
+      throw e;
+    }
+  }
+
+  private async putBucketWebsite(bucket: string, req: Request, ctx: RequestContext): Promise<Response> {
+    const body = await req.text();
+    const config: any = {};
+
+    const indexMatch = body.match(/<IndexDocument>\s*<Suffix>([^<]+)<\/Suffix>\s*<\/IndexDocument>/);
+    if (indexMatch) config.IndexDocument = { Suffix: indexMatch[1] };
+
+    const errorMatch = body.match(/<ErrorDocument>\s*<Key>([^<]+)<\/Key>\s*<\/ErrorDocument>/);
+    if (errorMatch) config.ErrorDocument = { Key: errorMatch[1] };
+
+    const redirectMatch = body.match(/<RedirectAllRequestsTo>([\s\S]*?)<\/RedirectAllRequestsTo>/);
+    if (redirectMatch) {
+      config.RedirectAllRequestsTo = {};
+      const hostMatch = redirectMatch[1].match(/<HostName>([^<]+)<\/HostName>/);
+      if (hostMatch) config.RedirectAllRequestsTo.HostName = hostMatch[1];
+      const protocolMatch = redirectMatch[1].match(/<Protocol>([^<]+)<\/Protocol>/);
+      if (protocolMatch) config.RedirectAllRequestsTo.Protocol = protocolMatch[1];
+    }
+
+    const routingRules: any[] = [];
+    const ruleRegex = /<RoutingRule>([\s\S]*?)<\/RoutingRule>/g;
+    let match;
+    while ((match = ruleRegex.exec(body)) !== null) {
+      const rule: any = {};
+      const condMatch = match[1].match(/<Condition>([\s\S]*?)<\/Condition>/);
+      if (condMatch) {
+        rule.Condition = {};
+        const kpe = condMatch[1].match(/<KeyPrefixEquals>([^<]+)<\/KeyPrefixEquals>/);
+        if (kpe) rule.Condition.KeyPrefixEquals = kpe[1];
+        const hecre = condMatch[1].match(/<HttpErrorCodeReturnedEquals>([^<]+)<\/HttpErrorCodeReturnedEquals>/);
+        if (hecre) rule.Condition.HttpErrorCodeReturnedEquals = hecre[1];
+      }
+      const redirMatch = match[1].match(/<Redirect>([\s\S]*?)<\/Redirect>/);
+      if (redirMatch) {
+        rule.Redirect = {};
+        const rhn = redirMatch[1].match(/<HostName>([^<]+)<\/HostName>/);
+        if (rhn) rule.Redirect.HostName = rhn[1];
+        const rp = redirMatch[1].match(/<Protocol>([^<]+)<\/Protocol>/);
+        if (rp) rule.Redirect.Protocol = rp[1];
+        const rkpw = redirMatch[1].match(/<ReplaceKeyPrefixWith>([^<]*)<\/ReplaceKeyPrefixWith>/);
+        if (rkpw) rule.Redirect.ReplaceKeyPrefixWith = rkpw[1];
+        const rkw = redirMatch[1].match(/<ReplaceKeyWith>([^<]*)<\/ReplaceKeyWith>/);
+        if (rkw) rule.Redirect.ReplaceKeyWith = rkw[1];
+        const hrc = redirMatch[1].match(/<HttpRedirectCode>([^<]+)<\/HttpRedirectCode>/);
+        if (hrc) rule.Redirect.HttpRedirectCode = hrc[1];
+      }
+      routingRules.push(rule);
+    }
+    if (routingRules.length) config.RoutingRules = routingRules;
+
+    this.service.putBucketWebsite(bucket, config);
+    return new Response(null, { status: 200, headers: { "x-amz-request-id": ctx.requestId } });
+  }
+
+  // Public Access Block
+  private getPublicAccessBlock(bucket: string, ctx: RequestContext): Response {
+    try {
+      const config = this.service.getPublicAccessBlock(bucket);
+      const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+      return this.xml(`<?xml version="1.0" encoding="UTF-8"?><PublicAccessBlockConfiguration xmlns="${ns}"><BlockPublicAcls>${config.BlockPublicAcls ?? false}</BlockPublicAcls><IgnorePublicAcls>${config.IgnorePublicAcls ?? false}</IgnorePublicAcls><BlockPublicPolicy>${config.BlockPublicPolicy ?? false}</BlockPublicPolicy><RestrictPublicBuckets>${config.RestrictPublicBuckets ?? false}</RestrictPublicBuckets></PublicAccessBlockConfiguration>`, ctx);
+    } catch (e) {
+      if (e instanceof AwsError) {
+        // Return default (all false) when not configured
+        const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+        return this.xml(`<?xml version="1.0" encoding="UTF-8"?><PublicAccessBlockConfiguration xmlns="${ns}"><BlockPublicAcls>false</BlockPublicAcls><IgnorePublicAcls>false</IgnorePublicAcls><BlockPublicPolicy>false</BlockPublicPolicy><RestrictPublicBuckets>false</RestrictPublicBuckets></PublicAccessBlockConfiguration>`, ctx);
+      }
+      throw e;
+    }
+  }
+
+  private async putPublicAccessBlock(bucket: string, req: Request, ctx: RequestContext): Promise<Response> {
+    const body = await req.text();
+    const config: any = {};
+    const bpa = body.match(/<BlockPublicAcls>([^<]+)<\/BlockPublicAcls>/);
+    if (bpa) config.BlockPublicAcls = bpa[1] === "true";
+    const ipa = body.match(/<IgnorePublicAcls>([^<]+)<\/IgnorePublicAcls>/);
+    if (ipa) config.IgnorePublicAcls = ipa[1] === "true";
+    const bpp = body.match(/<BlockPublicPolicy>([^<]+)<\/BlockPublicPolicy>/);
+    if (bpp) config.BlockPublicPolicy = bpp[1] === "true";
+    const rpb = body.match(/<RestrictPublicBuckets>([^<]+)<\/RestrictPublicBuckets>/);
+    if (rpb) config.RestrictPublicBuckets = rpb[1] === "true";
+    this.service.putPublicAccessBlock(bucket, config);
+    return new Response(null, { status: 200, headers: { "x-amz-request-id": ctx.requestId } });
+  }
+
+  // Bucket Logging
+  private getBucketLogging(bucket: string, ctx: RequestContext): Response {
+    const config = this.service.getBucketLogging(bucket);
+    const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+    if (!config) {
+      return this.xml(`<?xml version="1.0" encoding="UTF-8"?><BucketLoggingStatus xmlns="${ns}"/>`, ctx);
+    }
+    const xml = new XmlBuilder().start("BucketLoggingStatus", { xmlns: ns });
+    if (config.TargetBucket) {
+      xml.start("LoggingEnabled");
+      xml.elem("TargetBucket", config.TargetBucket);
+      if (config.TargetPrefix !== undefined) xml.elem("TargetPrefix", config.TargetPrefix);
+      xml.end("LoggingEnabled");
+    }
+    xml.end("BucketLoggingStatus");
+    return this.xml(`<?xml version="1.0" encoding="UTF-8"?>${xml.build()}`, ctx);
+  }
+
+  private async putBucketLogging(bucket: string, req: Request, ctx: RequestContext): Promise<Response> {
+    const body = await req.text();
+    const loggingMatch = body.match(/<LoggingEnabled>([\s\S]*?)<\/LoggingEnabled>/);
+    if (loggingMatch) {
+      const config: any = {};
+      const tbMatch = loggingMatch[1].match(/<TargetBucket>([^<]+)<\/TargetBucket>/);
+      if (tbMatch) config.TargetBucket = tbMatch[1];
+      const tpMatch = loggingMatch[1].match(/<TargetPrefix>([^<]*)<\/TargetPrefix>/);
+      if (tpMatch) config.TargetPrefix = tpMatch[1];
+      this.service.putBucketLogging(bucket, config);
+    } else {
+      // Disable logging
+      this.service.putBucketLogging(bucket, null);
+    }
+    return new Response(null, { status: 200, headers: { "x-amz-request-id": ctx.requestId } });
+  }
+
   private getBucketLocation(bucket: string, ctx: RequestContext): Response {
     const location = this.service.getBucketLocation(bucket);
     const xml = `<?xml version="1.0" encoding="UTF-8"?><LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">${escapeXml(location)}</LocationConstraint>`;
     return this.xml(xml, ctx);
+  }
+
+  // Object Lock Configuration
+  private getObjectLockConfiguration(bucket: string, ctx: RequestContext): Response {
+    try {
+      const config = this.service.getObjectLockConfiguration(bucket);
+      const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+      const xml = new XmlBuilder().start("ObjectLockConfiguration", { xmlns: ns });
+      xml.elem("ObjectLockEnabled", config.objectLockEnabled ? "Enabled" : "Disabled");
+      if (config.rule?.defaultRetention) {
+        xml.start("Rule").start("DefaultRetention");
+        xml.elem("Mode", config.rule.defaultRetention.mode);
+        if (config.rule.defaultRetention.days !== undefined) xml.elem("Days", config.rule.defaultRetention.days);
+        if (config.rule.defaultRetention.years !== undefined) xml.elem("Years", config.rule.defaultRetention.years);
+        xml.end("DefaultRetention").end("Rule");
+      }
+      xml.end("ObjectLockConfiguration");
+      return this.xml(`<?xml version="1.0" encoding="UTF-8"?>${xml.build()}`, ctx);
+    } catch (e) {
+      if (e instanceof AwsError) return xmlErrorResponse(e, ctx.requestId);
+      throw e;
+    }
+  }
+
+  private async putObjectLockConfiguration(bucket: string, req: Request, ctx: RequestContext): Promise<Response> {
+    const body = await req.text();
+    const enabled = body.includes("<ObjectLockEnabled>Enabled</ObjectLockEnabled>");
+    const config: any = { objectLockEnabled: enabled };
+    const modeMatch = body.match(/<DefaultRetention>[\s\S]*?<Mode>([^<]+)<\/Mode>/);
+    if (modeMatch) {
+      config.rule = { defaultRetention: { mode: modeMatch[1] } };
+      const daysMatch = body.match(/<DefaultRetention>[\s\S]*?<Days>(\d+)<\/Days>/);
+      if (daysMatch) config.rule.defaultRetention.days = parseInt(daysMatch[1]);
+      const yearsMatch = body.match(/<DefaultRetention>[\s\S]*?<Years>(\d+)<\/Years>/);
+      if (yearsMatch) config.rule.defaultRetention.years = parseInt(yearsMatch[1]);
+    }
+    this.service.putObjectLockConfiguration(bucket, config);
+    return new Response(null, { status: 200, headers: { "x-amz-request-id": ctx.requestId } });
+  }
+
+  // Object Retention
+  private getObjectRetention(bucket: string, key: string, ctx: RequestContext): Response {
+    try {
+      const retention = this.service.getObjectRetention(bucket, key);
+      const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+      const xml = new XmlBuilder().start("Retention", { xmlns: ns });
+      xml.elem("Mode", retention.mode);
+      xml.elem("RetainUntilDate", retention.retainUntilDate);
+      xml.end("Retention");
+      return this.xml(`<?xml version="1.0" encoding="UTF-8"?>${xml.build()}`, ctx);
+    } catch (e) {
+      if (e instanceof AwsError) return xmlErrorResponse(e, ctx.requestId);
+      throw e;
+    }
+  }
+
+  private async putObjectRetention(bucket: string, key: string, req: Request, ctx: RequestContext): Promise<Response> {
+    const body = await req.text();
+    const modeMatch = body.match(/<Mode>([^<]+)<\/Mode>/);
+    const dateMatch = body.match(/<RetainUntilDate>([^<]+)<\/RetainUntilDate>/);
+    if (!modeMatch || !dateMatch) {
+      return xmlErrorResponse(new AwsError("MalformedXML", "The XML you provided was not well-formed", 400), ctx.requestId);
+    }
+    this.service.putObjectRetention(bucket, key, {
+      mode: modeMatch[1] as "GOVERNANCE" | "COMPLIANCE",
+      retainUntilDate: dateMatch[1],
+    });
+    return new Response(null, { status: 200, headers: { "x-amz-request-id": ctx.requestId } });
+  }
+
+  // Object Legal Hold
+  private getObjectLegalHold(bucket: string, key: string, ctx: RequestContext): Response {
+    try {
+      const legalHold = this.service.getObjectLegalHold(bucket, key);
+      const ns = "http://s3.amazonaws.com/doc/2006-03-01/";
+      const xml = new XmlBuilder().start("LegalHold", { xmlns: ns });
+      xml.elem("Status", legalHold.status);
+      xml.end("LegalHold");
+      return this.xml(`<?xml version="1.0" encoding="UTF-8"?>${xml.build()}`, ctx);
+    } catch (e) {
+      if (e instanceof AwsError) return xmlErrorResponse(e, ctx.requestId);
+      throw e;
+    }
+  }
+
+  private async putObjectLegalHold(bucket: string, key: string, req: Request, ctx: RequestContext): Promise<Response> {
+    const body = await req.text();
+    const statusMatch = body.match(/<Status>([^<]+)<\/Status>/);
+    if (!statusMatch) {
+      return xmlErrorResponse(new AwsError("MalformedXML", "The XML you provided was not well-formed", 400), ctx.requestId);
+    }
+    this.service.putObjectLegalHold(bucket, key, {
+      status: statusMatch[1] as "ON" | "OFF",
+    });
+    return new Response(null, { status: 200, headers: { "x-amz-request-id": ctx.requestId } });
+  }
+
+  // GetObjectAttributes
+  private getObjectAttributes(bucket: string, key: string, req: Request, ctx: RequestContext): Response {
+    try {
+      const attrHeader = req.headers.get("x-amz-object-attributes") ?? "";
+      const attributes = attrHeader.split(",").map(a => a.trim()).filter(Boolean);
+      const result = this.service.getObjectAttributes(bucket, key, attributes);
+      const xml = new XmlBuilder().start("GetObjectAttributesResponse", { xmlns: "http://s3.amazonaws.com/doc/2006-03-01/" });
+      if (result.ETag !== undefined) xml.elem("ETag", result.ETag);
+      if (result.StorageClass !== undefined) xml.elem("StorageClass", result.StorageClass);
+      if (result.ObjectSize !== undefined) xml.elem("ObjectSize", result.ObjectSize);
+      if (result.Checksum !== undefined) xml.start("Checksum").end("Checksum");
+      if (result.ObjectParts !== undefined) {
+        xml.start("ObjectParts");
+        xml.elem("TotalPartsCount", result.ObjectParts.TotalPartsCount);
+        xml.end("ObjectParts");
+      }
+      xml.end("GetObjectAttributesResponse");
+      return this.xml(`<?xml version="1.0" encoding="UTF-8"?>${xml.build()}`, ctx);
+    } catch (e) {
+      if (e instanceof AwsError) return xmlErrorResponse(e, ctx.requestId);
+      throw e;
+    }
   }
 }

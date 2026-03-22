@@ -70,6 +70,77 @@ export class CloudWatchLogsHandler {
           if (match) this.service.untagLogGroup(match[1], body.tagKeys ?? [], ctx.region);
           return this.json({}, ctx);
         }
+        case "PutMetricFilter":
+          this.service.putMetricFilter(body.logGroupName, body.filterName, body.filterPattern, body.metricTransformations ?? [], ctx.region);
+          return this.json({}, ctx);
+        case "DescribeMetricFilters":
+          return this.json({
+            metricFilters: this.service.describeMetricFilters(body.logGroupName, ctx.region).map((f) => ({
+              filterName: f.filterName, filterPattern: f.filterPattern, logGroupName: f.logGroupName,
+              metricTransformations: f.metricTransformations, creationTime: f.creationTime,
+            })),
+          }, ctx);
+        case "DeleteMetricFilter":
+          this.service.deleteMetricFilter(body.logGroupName, body.filterName, ctx.region);
+          return this.json({}, ctx);
+        case "PutSubscriptionFilter":
+          this.service.putSubscriptionFilter(body.logGroupName, body.filterName, body.filterPattern, body.destinationArn, body.roleArn, ctx.region);
+          return this.json({}, ctx);
+        case "DescribeSubscriptionFilters":
+          return this.json({
+            subscriptionFilters: this.service.describeSubscriptionFilters(body.logGroupName, ctx.region).map((f) => ({
+              filterName: f.filterName, filterPattern: f.filterPattern, logGroupName: f.logGroupName,
+              destinationArn: f.destinationArn, roleArn: f.roleArn, creationTime: f.creationTime,
+            })),
+          }, ctx);
+        case "DeleteSubscriptionFilter":
+          this.service.deleteSubscriptionFilter(body.logGroupName, body.filterName, ctx.region);
+          return this.json({}, ctx);
+        case "CreateExportTask": {
+          const taskId = this.service.createExportTask(
+            body.logGroupName, body.from, body.to, body.destination,
+            body.destinationPrefix, body.taskName, ctx.region,
+          );
+          return this.json({ taskId }, ctx);
+        }
+        case "DescribeExportTasks":
+          return this.json({
+            exportTasks: this.service.describeExportTasks(body.taskId, ctx.region).map((t) => ({
+              taskId: t.taskId, taskName: t.taskName, logGroupName: t.logGroupName,
+              from: t.fromTime, to: t.to, destination: t.destination,
+              destinationPrefix: t.destinationPrefix, status: t.status,
+            })),
+          }, ctx);
+        case "CancelExportTask":
+          this.service.cancelExportTask(body.taskId, ctx.region);
+          return this.json({}, ctx);
+        case "PutResourcePolicy": {
+          const policy = this.service.putResourcePolicy(body.policyName, body.policyDocument, ctx.region);
+          return this.json({ resourcePolicy: { policyName: policy.policyName, policyDocument: policy.policyDocument, lastUpdatedTime: policy.lastUpdatedTime } }, ctx);
+        }
+        case "DescribeResourcePolicies":
+          return this.json({
+            resourcePolicies: this.service.describeResourcePolicies(ctx.region).map((p) => ({
+              policyName: p.policyName, policyDocument: p.policyDocument, lastUpdatedTime: p.lastUpdatedTime,
+            })),
+          }, ctx);
+        case "DeleteResourcePolicy":
+          this.service.deleteResourcePolicy(body.policyName, ctx.region);
+          return this.json({}, ctx);
+        case "PutDestination": {
+          const dest = this.service.putDestination(body.destinationName, body.targetArn, body.roleArn, ctx.region);
+          return this.json({ destination: { destinationName: dest.destinationName, targetArn: dest.targetArn, roleArn: dest.roleArn, arn: dest.arn, creationTime: dest.creationTime } }, ctx);
+        }
+        case "DescribeDestinations":
+          return this.json({
+            destinations: this.service.describeDestinations(body.DestinationNamePrefix, ctx.region).map((d) => ({
+              destinationName: d.destinationName, targetArn: d.targetArn, roleArn: d.roleArn,
+              arn: d.arn, creationTime: d.creationTime,
+            })),
+          }, ctx);
+        case "DeleteDestination":
+          this.service.deleteDestination(body.destinationName, ctx.region);
+          return this.json({}, ctx);
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }

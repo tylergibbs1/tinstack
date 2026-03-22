@@ -11,6 +11,16 @@ import {
   GetExecutionHistoryCommand,
   DeleteStateMachineCommand,
   StartSyncExecutionCommand,
+  CreateActivityCommand,
+  DescribeActivityCommand,
+  ListActivitiesCommand,
+  DeleteActivityCommand,
+  SendTaskSuccessCommand,
+  SendTaskFailureCommand,
+  SendTaskHeartbeatCommand,
+  TagResourceCommand,
+  UntagResourceCommand,
+  ListTagsForResourceCommand,
 } from "@aws-sdk/client-sfn";
 import { startServer, stopServer, clientConfig } from "./helpers";
 
@@ -275,5 +285,87 @@ describe("Step Functions", () => {
     await sfn.send(new DeleteStateMachineCommand({ stateMachineArn: smArn }));
     const res = await sfn.send(new ListStateMachinesCommand({}));
     expect(res.stateMachines?.some((sm) => sm.stateMachineArn === smArn)).toBeFalsy();
+  });
+});
+
+describe("Step Functions Activities", () => {
+  let activityArn: string;
+
+  test("CreateActivity", async () => {
+    const res = await sfn.send(new CreateActivityCommand({ name: "test-activity" }));
+    activityArn = res.activityArn!;
+    expect(activityArn).toContain("test-activity");
+    expect(res.creationDate).toBeDefined();
+  });
+
+  test("DescribeActivity", async () => {
+    const res = await sfn.send(new DescribeActivityCommand({ activityArn }));
+    expect(res.name).toBe("test-activity");
+    expect(res.activityArn).toBe(activityArn);
+    expect(res.creationDate).toBeDefined();
+  });
+
+  test("ListActivities", async () => {
+    const res = await sfn.send(new ListActivitiesCommand({}));
+    expect(res.activities?.some((a) => a.activityArn === activityArn)).toBe(true);
+  });
+
+  test("DeleteActivity", async () => {
+    await sfn.send(new DeleteActivityCommand({ activityArn }));
+    const res = await sfn.send(new ListActivitiesCommand({}));
+    expect(res.activities?.some((a) => a.activityArn === activityArn)).toBeFalsy();
+  });
+});
+
+describe("Step Functions Task Callbacks", () => {
+  test("SendTaskSuccess", async () => {
+    const res = await sfn.send(new SendTaskSuccessCommand({
+      taskToken: "test-token-success",
+      output: JSON.stringify({ result: "done" }),
+    }));
+    expect(res).toBeDefined();
+  });
+
+  test("SendTaskFailure", async () => {
+    const res = await sfn.send(new SendTaskFailureCommand({
+      taskToken: "test-token-failure",
+      error: "TaskFailed",
+      cause: "Something went wrong",
+    }));
+    expect(res).toBeDefined();
+  });
+
+  test("SendTaskHeartbeat", async () => {
+    const res = await sfn.send(new SendTaskHeartbeatCommand({
+      taskToken: "test-token-heartbeat",
+    }));
+    expect(res).toBeDefined();
+  });
+});
+
+describe("Step Functions UntagResource", () => {
+  test("TagResource then UntagResource", async () => {
+    const sm = await sfn.send(new CreateStateMachineCommand({
+      name: "tag-untag-machine",
+      definition: JSON.stringify({ StartAt: "Pass", States: { Pass: { Type: "Pass", End: true } } }),
+      roleArn: "arn:aws:iam::000000000000:role/role",
+      tags: [{ key: "env", value: "test" }, { key: "team", value: "alpha" }],
+    }));
+    const arn = sm.stateMachineArn!;
+
+    // Verify tags exist
+    let tags = await sfn.send(new ListTagsForResourceCommand({ resourceArn: arn }));
+    expect(tags.tags?.some((t) => t.key === "env")).toBe(true);
+    expect(tags.tags?.some((t) => t.key === "team")).toBe(true);
+
+    // Untag one key
+    await sfn.send(new UntagResourceCommand({ resourceArn: arn, tagKeys: ["env"] }));
+
+    // Verify only "team" remains
+    tags = await sfn.send(new ListTagsForResourceCommand({ resourceArn: arn }));
+    expect(tags.tags?.some((t) => t.key === "env")).toBeFalsy();
+    expect(tags.tags?.some((t) => t.key === "team")).toBe(true);
+
+    await sfn.send(new DeleteStateMachineCommand({ stateMachineArn: arn }));
   });
 });

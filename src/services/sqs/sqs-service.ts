@@ -2,12 +2,19 @@ import { InMemoryStorage, type StorageBackend } from "../../core/storage";
 import { AwsError } from "../../core/errors";
 import { buildArn } from "../../core/arn";
 
+export interface SqsPermission {
+  label: string;
+  awsAccountIds: string[];
+  actions: string[];
+}
+
 export interface SqsQueue {
   queueName: string;
   queueUrl: string;
   arn: string;
   attributes: Record<string, string>;
   tags: Record<string, string>;
+  permissions: SqsPermission[];
   createdTimestamp: number;
   lastModifiedTimestamp: number;
 }
@@ -86,6 +93,7 @@ export class SqsService {
         ...attributes,
       },
       tags,
+      permissions: [],
       createdTimestamp: now,
       lastModifiedTimestamp: now,
     };
@@ -228,6 +236,29 @@ export class SqsService {
       msg.receiveCount++;
       msg.visibleAt = now + vt;
       if (!msg.firstReceiveTimestamp) msg.firstReceiveTimestamp = now;
+
+      // Check RedrivePolicy — if receiveCount exceeds maxReceiveCount, move to DLQ
+      const redrivePolicy = queue.attributes.RedrivePolicy;
+      if (redrivePolicy) {
+        const policy = JSON.parse(redrivePolicy) as { deadLetterTargetArn: string; maxReceiveCount: number };
+        if (msg.receiveCount > policy.maxReceiveCount) {
+          const dlqQueue = this.findQueueByArn(policy.deadLetterTargetArn);
+          if (dlqQueue) {
+            const dlqKey = this.findKeyByArn(policy.deadLetterTargetArn)!;
+            // Remove from source queue
+            const idx = msgs.indexOf(msg);
+            if (idx >= 0) msgs.splice(idx, 1);
+            // Reset message state and add to DLQ
+            msg.receiptHandle = undefined;
+            msg.visibleAt = Date.now();
+            const dlqMsgs = this.messages.get(dlqKey) ?? [];
+            dlqMsgs.push(msg);
+            this.messages.set(dlqKey, dlqMsgs);
+            continue;
+          }
+        }
+      }
+
       result.push({ ...msg });
     }
 
@@ -249,6 +280,9 @@ export class SqsService {
     const msg = msgs.find((m) => m.receiptHandle === receiptHandle);
     if (!msg) throw new AwsError("ReceiptHandleIsInvalid", "The input receipt handle is invalid.", 400);
     msg.visibleAt = Date.now() + visibilityTimeout * 1000;
+    if (visibilityTimeout === 0) {
+      msg.receiptHandle = undefined;
+    }
   }
 
   purgeQueue(queueUrl: string, region: string): void {
@@ -269,6 +303,53 @@ export class SqsService {
 
   listQueueTags(queueUrl: string, region: string): Record<string, string> {
     return this.getQueue(queueUrl, region).tags;
+  }
+
+  changeMessageVisibilityBatch(
+    queueUrl: string,
+    entries: { id: string; receiptHandle: string; visibilityTimeout: number }[],
+    region: string,
+  ): { successful: { id: string }[]; failed: { id: string; code: string; message: string; senderFault: boolean }[] } {
+    const successful: { id: string }[] = [];
+    const failed: { id: string; code: string; message: string; senderFault: boolean }[] = [];
+    for (const entry of entries) {
+      try {
+        this.changeMessageVisibility(queueUrl, entry.receiptHandle, entry.visibilityTimeout, region);
+        successful.push({ id: entry.id });
+      } catch (e: any) {
+        failed.push({ id: entry.id, code: e.code ?? "InternalError", message: e.message, senderFault: true });
+      }
+    }
+    return { successful, failed };
+  }
+
+  addPermission(queueUrl: string, label: string, awsAccountIds: string[], actions: string[], region: string): void {
+    const queue = this.getQueue(queueUrl, region);
+    if (queue.permissions.some((p) => p.label === label)) {
+      throw new AwsError("InvalidParameterValue", `Value ${label} for parameter Label is invalid. Reason: Already exists.`, 400);
+    }
+    queue.permissions.push({ label, awsAccountIds, actions });
+  }
+
+  removePermission(queueUrl: string, label: string, region: string): void {
+    const queue = this.getQueue(queueUrl, region);
+    const idx = queue.permissions.findIndex((p) => p.label === label);
+    if (idx < 0) {
+      throw new AwsError("InvalidParameterValue", `Value ${label} for parameter Label is invalid. Reason: Does not exist.`, 400);
+    }
+    queue.permissions.splice(idx, 1);
+  }
+
+  private findQueueByArn(arn: string): SqsQueue | undefined {
+    return this.queues.values().find((q) => q.arn === arn);
+  }
+
+  private findKeyByArn(arn: string): string | undefined {
+    for (const key of this.queues.keys()) {
+      const queue = this.queues.get(key);
+      if (queue && queue.arn === arn) return key;
+    }
+    return undefined;
   }
 
   private getQueue(queueUrl: string, region: string): SqsQueue {

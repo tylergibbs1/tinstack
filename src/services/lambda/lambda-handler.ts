@@ -1,6 +1,6 @@
 import type { RequestContext } from "../../core/context";
 import { AwsError, jsonErrorResponse } from "../../core/errors";
-import type { LambdaService, LambdaFunction } from "./lambda-service";
+import type { LambdaService, LambdaFunction, LambdaAlias, LayerVersion } from "./lambda-service";
 
 export class LambdaHandler {
   constructor(private service: LambdaService) {}
@@ -73,12 +73,121 @@ export class LambdaHandler {
         return this.json({ CodeSigningConfigArn: null, FunctionName: decodeURIComponent(cscMatch[1]) }, ctx);
       }
 
-      // GET /2015-03-31/functions/{name}/versions
+      // POST /2015-03-31/functions/{name}/versions — PublishVersion
+      const publishVersionMatch = path.match(/^\/2015-03-31\/functions\/([^/]+)\/versions$/);
+      if (publishVersionMatch && method === "POST") {
+        const name = decodeURIComponent(publishVersionMatch[1]);
+        const body = await req.json();
+        const ver = this.service.publishVersion(name, body.Description, ctx.region);
+        return this.json({ ...fnToJson(ver.config), Version: ver.version }, ctx, 201);
+      }
+
+      // GET /2015-03-31/functions/{name}/versions — ListVersionsByFunction
       const versionsMatch = path.match(/^\/2015-03-31\/functions\/([^/]+)\/versions$/);
       if (versionsMatch && method === "GET") {
         const name = decodeURIComponent(versionsMatch[1]);
-        const fn = this.service.getFunction(name, ctx.region);
-        return this.json({ Versions: [{ ...fnToJson(fn), Version: "$LATEST" }] }, ctx);
+        const versions = this.service.listVersionsByFunction(name, ctx.region);
+        return this.json({ Versions: versions.map((v) => ({ ...fnToJson(v.config), Version: v.version })) }, ctx);
+      }
+
+      // Aliases
+      const aliasSpecificMatch = path.match(/^\/2015-03-31\/functions\/([^/]+)\/aliases\/([^/]+)$/);
+      if (aliasSpecificMatch) {
+        const name = decodeURIComponent(aliasSpecificMatch[1]);
+        const aliasName = decodeURIComponent(aliasSpecificMatch[2]);
+        if (method === "GET") {
+          const alias = this.service.getAlias(name, aliasName, ctx.region);
+          return this.json(aliasToJson(alias), ctx);
+        }
+        if (method === "PUT") {
+          const body = await req.json();
+          const alias = this.service.updateAlias(name, aliasName, body.FunctionVersion, body.Description, body.RoutingConfig, ctx.region);
+          return this.json(aliasToJson(alias), ctx);
+        }
+        if (method === "DELETE") {
+          this.service.deleteAlias(name, aliasName, ctx.region);
+          return new Response(null, { status: 204, headers: { "x-amzn-RequestId": ctx.requestId } });
+        }
+      }
+
+      const aliasesMatch = path.match(/^\/2015-03-31\/functions\/([^/]+)\/aliases$/);
+      if (aliasesMatch) {
+        const name = decodeURIComponent(aliasesMatch[1]);
+        if (method === "POST") {
+          const body = await req.json();
+          const alias = this.service.createAlias(name, body.Name, body.FunctionVersion, body.Description ?? "", body.RoutingConfig, ctx.region);
+          return this.json(aliasToJson(alias), ctx, 201);
+        }
+        if (method === "GET") {
+          const aliases = this.service.listAliases(name, ctx.region);
+          return this.json({ Aliases: aliases.map(aliasToJson) }, ctx);
+        }
+      }
+
+      // Permissions (policy)
+      const removePermMatch = path.match(/^\/2015-03-31\/functions\/([^/]+)\/policy\/([^/]+)$/);
+      if (removePermMatch && method === "DELETE") {
+        const name = decodeURIComponent(removePermMatch[1]);
+        const sid = decodeURIComponent(removePermMatch[2]);
+        this.service.removePermission(name, sid, ctx.region);
+        return new Response(null, { status: 204, headers: { "x-amzn-RequestId": ctx.requestId } });
+      }
+
+      const policyMatch = path.match(/^\/2015-03-31\/functions\/([^/]+)\/policy$/);
+      if (policyMatch) {
+        const name = decodeURIComponent(policyMatch[1]);
+        if (method === "POST") {
+          const body = await req.json();
+          const fn = this.service.getFunction(name, ctx.region);
+          const stmt = {
+            sid: body.StatementId,
+            effect: "Allow",
+            principal: body.Principal ? { Service: body.Principal } : "*",
+            action: body.Action ?? "lambda:InvokeFunction",
+            resource: fn.functionArn,
+            condition: body.SourceArn ? { ArnLike: { "AWS:SourceArn": body.SourceArn } } : undefined,
+          };
+          this.service.addPermission(name, stmt, ctx.region);
+          return this.json({ Statement: JSON.stringify({ Sid: stmt.sid, Effect: stmt.effect, Principal: stmt.principal, Action: stmt.action, Resource: stmt.resource }) }, ctx, 201);
+        }
+        if (method === "GET") {
+          const result = this.service.getPolicy(name, ctx.region);
+          return this.json({ Policy: result.policy, RevisionId: result.revisionId }, ctx);
+        }
+      }
+
+      // Layers (accept both 2015-03-31 and 2018-10-31 prefixes)
+      const layerVersionSpecificMatch = path.match(/^\/(2015-03-31|2018-10-31)\/layers\/([^/]+)\/versions\/(\d+)$/);
+      if (layerVersionSpecificMatch) {
+        const layerName = decodeURIComponent(layerVersionSpecificMatch[2]);
+        const versionNum = parseInt(layerVersionSpecificMatch[3], 10);
+        if (method === "GET") {
+          const lv = this.service.getLayerVersion(layerName, versionNum, ctx.region);
+          return this.json(layerVersionToJson(lv), ctx);
+        }
+        if (method === "DELETE") {
+          this.service.deleteLayerVersion(layerName, versionNum, ctx.region);
+          return new Response(null, { status: 204, headers: { "x-amzn-RequestId": ctx.requestId } });
+        }
+      }
+
+      const layerVersionsMatch = path.match(/^\/(2015-03-31|2018-10-31)\/layers\/([^/]+)\/versions$/);
+      if (layerVersionsMatch) {
+        const layerName = decodeURIComponent(layerVersionsMatch[2]);
+        if (method === "POST") {
+          const body = await req.json();
+          const lv = this.service.publishLayerVersion(layerName, body.Description, body.Content, body.CompatibleRuntimes, ctx.region);
+          return this.json(layerVersionToJson(lv), ctx, 201);
+        }
+        if (method === "GET") {
+          const versions = this.service.listLayerVersions(layerName, ctx.region);
+          return this.json({ LayerVersions: versions.map(layerVersionToJson) }, ctx);
+        }
+      }
+
+      if ((path === "/2015-03-31/layers" || path === "/2018-10-31/layers") && method === "GET") {
+        const layers = this.service.listLayers(ctx.region);
+        return this.json({ Layers: layers.map((lv) => ({ LayerName: lv.layerName, LayerArn: lv.layerVersionArn.replace(`:${lv.version}`, ""), LatestMatchingVersion: layerVersionToJson(lv) })) }, ctx);
       }
 
       // PUT /2015-03-31/functions/{name}/code
@@ -177,5 +286,22 @@ function mappingToJson(m: any): any {
     UUID: m.uuid, FunctionArn: m.functionArn,
     EventSourceArn: m.eventSourceArn, BatchSize: m.batchSize,
     State: m.state, LastModified: m.lastModified,
+  };
+}
+
+function aliasToJson(a: LambdaAlias): any {
+  return {
+    AliasArn: a.aliasArn, Name: a.name,
+    FunctionVersion: a.functionVersion, Description: a.description,
+    RoutingConfig: a.routingConfig, RevisionId: a.revisionId,
+  };
+}
+
+function layerVersionToJson(lv: LayerVersion): any {
+  return {
+    LayerVersionArn: lv.layerVersionArn, Version: lv.version,
+    Description: lv.description, CreatedDate: lv.createdDate,
+    CompatibleRuntimes: lv.compatibleRuntimes,
+    Content: { CodeSha256: lv.content.codeSha256, CodeSize: lv.content.codeSize },
   };
 }

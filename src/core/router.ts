@@ -23,6 +23,13 @@ const TARGET_PREFIX_MAP: Record<string, string> = {
   GraniteServiceVersion20100801: "cloudwatch",
   CertificateManager: "acm",
   AmazonEC2ContainerRegistry_V20150921: "ecr",
+  Firehose_20150804: "firehose",
+  AmazonEC2ContainerServiceV20141113: "ecs",
+  AWSWAF_20190729: "wafv2",
+  AmazonAthena: "athena",
+  AWSGlue: "glue",
+  Textract: "textract",
+  AmazonBedrock: "bedrock",
 };
 
 export class JsonRouter {
@@ -88,20 +95,26 @@ export class QueryRouter {
     const sqsActions = ["CreateQueue", "DeleteQueue", "SendMessage", "ReceiveMessage", "DeleteMessage", "GetQueueUrl", "GetQueueAttributes", "SetQueueAttributes", "ListQueues", "PurgeQueue", "ChangeMessageVisibility", "SendMessageBatch", "DeleteMessageBatch", "TagQueue", "UntagQueue", "ListQueueTags"];
     if (sqsActions.includes(action)) return "sqs";
 
-    const snsActions = ["CreateTopic", "DeleteTopic", "Publish", "Subscribe", "Unsubscribe", "ListTopics", "ListSubscriptions", "GetTopicAttributes", "SetTopicAttributes", "ListSubscriptionsByTopic", "ListTagsForResource", "TagResource", "UntagResource", "GetSubscriptionAttributes", "SetSubscriptionAttributes"];
+    const snsActions = ["CreateTopic", "DeleteTopic", "Publish", "Subscribe", "Unsubscribe", "ListTopics", "ListSubscriptions", "GetTopicAttributes", "SetTopicAttributes", "ListSubscriptionsByTopic", "ListTagsForResource", "TagResource", "UntagResource", "GetSubscriptionAttributes", "SetSubscriptionAttributes", "CreatePlatformApplication", "GetPlatformApplicationAttributes", "SetPlatformApplicationAttributes", "ListPlatformApplications", "DeletePlatformApplication", "CreatePlatformEndpoint", "ListEndpointsByPlatformApplication", "DeleteEndpoint", "GetEndpointAttributes", "SetEndpointAttributes"];
     if (snsActions.includes(action)) return "sns";
 
-    const iamActions = ["CreateRole", "CreateUser", "CreatePolicy", "GetRole", "ListRoles", "ListUsers", "DeleteRole", "GetUser", "DeleteUser", "ListPolicies", "DeletePolicy", "AttachRolePolicy", "DetachRolePolicy", "PutRolePolicy", "DeleteRolePolicy", "CreateAccessKey", "ListAccessKeys", "DeleteAccessKey", "ListRolePolicies", "GetPolicy", "GetPolicyVersion", "ListAttachedRolePolicies", "ListPolicyVersions", "ListInstanceProfilesForRole"];
+    const iamActions = ["CreateRole", "CreateUser", "CreatePolicy", "GetRole", "ListRoles", "ListUsers", "DeleteRole", "GetUser", "DeleteUser", "ListPolicies", "DeletePolicy", "AttachRolePolicy", "DetachRolePolicy", "PutRolePolicy", "DeleteRolePolicy", "CreateAccessKey", "ListAccessKeys", "DeleteAccessKey", "UpdateAccessKey", "GetAccessKeyLastUsed", "ListRolePolicies", "GetPolicy", "GetPolicyVersion", "ListAttachedRolePolicies", "ListPolicyVersions", "ListInstanceProfilesForRole", "CreateGroup", "GetGroup", "ListGroups", "DeleteGroup", "AddUserToGroup", "RemoveUserFromGroup", "ListGroupsForUser", "PutGroupPolicy", "GetGroupPolicy", "ListGroupPolicies", "DeleteGroupPolicy", "CreateInstanceProfile", "GetInstanceProfile", "ListInstanceProfiles", "DeleteInstanceProfile", "AddRoleToInstanceProfile", "RemoveRoleFromInstanceProfile", "PutUserPolicy", "GetUserPolicy", "ListUserPolicies", "DeleteUserPolicy", "AttachUserPolicy", "DetachUserPolicy", "ListAttachedUserPolicies", "UpdateRole", "UpdateAssumeRolePolicy", "GetRolePolicy", "TagRole", "UntagRole", "ListRoleTags", "UpdateUser", "CreatePolicyVersion", "DeletePolicyVersion", "SetDefaultPolicyVersion"];
     if (iamActions.includes(action)) return "iam";
 
-    const stsActions = ["GetCallerIdentity", "AssumeRole", "GetSessionToken"];
+    const stsActions = ["GetCallerIdentity", "AssumeRole", "GetSessionToken", "AssumeRoleWithWebIdentity", "AssumeRoleWithSAML", "GetAccessKeyInfo"];
     if (stsActions.includes(action)) return "sts";
 
-    const ec2Actions = ["CreateVpc", "DescribeVpcs", "DeleteVpc", "ModifyVpcAttribute", "CreateTags", "DescribeTags", "CreateSubnet", "DescribeSubnets", "DeleteSubnet", "ModifySubnetAttribute", "CreateSecurityGroup", "DescribeSecurityGroups", "DeleteSecurityGroup", "AuthorizeSecurityGroupIngress", "AuthorizeSecurityGroupEgress", "RevokeSecurityGroupIngress", "RevokeSecurityGroupEgress", "CreateInternetGateway", "DescribeInternetGateways", "DeleteInternetGateway", "AttachInternetGateway", "DetachInternetGateway", "CreateRouteTable", "DescribeRouteTables", "DeleteRouteTable", "CreateRoute", "DeleteRoute", "AssociateRouteTable", "DisassociateRouteTable", "CreateNatGateway", "DescribeNatGateways", "DeleteNatGateway", "AllocateAddress", "DescribeAddresses", "ReleaseAddress", "DescribeNetworkAcls", "DescribeAvailabilityZones", "DescribeRegions", "DescribeAccountAttributes"];
+    const ec2Actions = ["CreateVpc", "DescribeVpcs", "DeleteVpc", "ModifyVpcAttribute", "CreateTags", "DescribeTags", "CreateSubnet", "DescribeSubnets", "DeleteSubnet", "ModifySubnetAttribute", "CreateSecurityGroup", "DescribeSecurityGroups", "DeleteSecurityGroup", "AuthorizeSecurityGroupIngress", "AuthorizeSecurityGroupEgress", "RevokeSecurityGroupIngress", "RevokeSecurityGroupEgress", "CreateInternetGateway", "DescribeInternetGateways", "DeleteInternetGateway", "AttachInternetGateway", "DetachInternetGateway", "CreateRouteTable", "DescribeRouteTables", "DeleteRouteTable", "CreateRoute", "DeleteRoute", "AssociateRouteTable", "DisassociateRouteTable", "CreateNatGateway", "DescribeNatGateways", "DeleteNatGateway", "AllocateAddress", "DescribeAddresses", "ReleaseAddress", "DescribeNetworkAcls", "DescribeAvailabilityZones", "DescribeRegions", "DescribeAccountAttributes", "RunInstances", "DescribeInstances", "TerminateInstances", "StartInstances", "StopInstances", "RebootInstances", "DescribeInstanceStatus", "ModifyInstanceAttribute", "CreateKeyPair", "DescribeKeyPairs", "DeleteKeyPair", "ImportKeyPair", "CreateVolume", "DescribeVolumes", "DeleteVolume", "AttachVolume", "DetachVolume", "ModifyVolume", "CreateImage", "DescribeImages", "DeregisterImage", "CopyImage", "CreateNetworkInterface", "DescribeNetworkInterfaces", "DeleteNetworkInterface", "AttachNetworkInterface", "DetachNetworkInterface", "CreateVpcEndpoint", "DescribeVpcEndpoints", "DeleteVpcEndpoints", "ModifyVpcEndpoint", "DescribeInstanceTypes"];
     if (ec2Actions.includes(action)) return "ec2";
 
-    const elbv2Actions = ["CreateLoadBalancer", "DescribeLoadBalancers", "DeleteLoadBalancer", "DescribeLoadBalancerAttributes", "ModifyLoadBalancerAttributes", "CreateTargetGroup", "DescribeTargetGroups", "DeleteTargetGroup", "DescribeTargetGroupAttributes", "ModifyTargetGroupAttributes", "CreateListener", "DescribeListeners", "DeleteListener", "DescribeTags", "AddTags", "RemoveTags"];
+    const elbv2Actions = ["CreateLoadBalancer", "DescribeLoadBalancers", "DeleteLoadBalancer", "DescribeLoadBalancerAttributes", "ModifyLoadBalancerAttributes", "CreateTargetGroup", "DescribeTargetGroups", "DeleteTargetGroup", "DescribeTargetGroupAttributes", "ModifyTargetGroupAttributes", "ModifyTargetGroup", "CreateListener", "DescribeListeners", "DeleteListener", "ModifyListener", "RegisterTargets", "DeregisterTargets", "DescribeTargetHealth", "CreateRule", "DescribeRules", "DeleteRule", "ModifyRule", "SetRulePriorities", "DescribeTags", "AddTags", "RemoveTags"];
     if (elbv2Actions.includes(action)) return "elasticloadbalancing";
+
+    const cfnActions = ["CreateStack", "DescribeStacks", "UpdateStack", "DeleteStack", "ListStacks", "GetTemplate", "DescribeStackResources", "DescribeStackEvents", "CreateChangeSet", "DescribeChangeSet", "ExecuteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListStackResources", "CreateStackSet", "DescribeStackSet", "ListStackSets", "DeleteStackSet", "CreateStackInstances", "ListStackInstances", "DeleteStackInstances"];
+    if (cfnActions.includes(action)) return "cloudformation";
+
+    const rdsActions = ["CreateDBInstance", "DescribeDBInstances", "ModifyDBInstance", "DeleteDBInstance", "CreateDBCluster", "DescribeDBClusters", "DeleteDBCluster", "CreateDBSubnetGroup", "DescribeDBSubnetGroups", "DeleteDBSubnetGroup", "CreateDBSnapshot", "DescribeDBSnapshots", "DeleteDBSnapshot", "DescribeDBEngineVersions", "CreateDBInstanceReadReplica", "PromoteReadReplica", "RebootDBInstance", "StartDBInstance", "StopDBInstance", "ModifyDBCluster", "CreateDBClusterSnapshot", "DescribeDBClusterSnapshots", "DeleteDBClusterSnapshot"];
+    if (rdsActions.includes(action)) return "rds";
 
     return "unknown";
   }

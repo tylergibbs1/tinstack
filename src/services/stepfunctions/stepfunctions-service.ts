@@ -29,9 +29,24 @@ export interface Execution {
   events: ExecutionEvent[];
 }
 
+export interface Activity {
+  activityArn: string;
+  name: string;
+  creationDate: number;
+}
+
+export interface TaskResult {
+  status: "succeeded" | "failed";
+  output?: string;
+  error?: string;
+  cause?: string;
+}
+
 export class StepFunctionsService {
   private stateMachines: StorageBackend<string, StateMachine>;
   private executions: StorageBackend<string, Execution>;
+  private activities: StorageBackend<string, Activity>;
+  private taskResults: Map<string, TaskResult> = new Map();
   private executionCounter = 0;
 
   constructor(
@@ -40,6 +55,7 @@ export class StepFunctionsService {
   ) {
     this.stateMachines = new InMemoryStorage();
     this.executions = new InMemoryStorage();
+    this.activities = new InMemoryStorage();
   }
 
   private regionKey(region: string, name: string): string {
@@ -195,6 +211,62 @@ export class StepFunctionsService {
       if (sm.stateMachineArn === arn) return sm.tags;
     }
     return {};
+  }
+
+  untagResource(arn: string, tagKeys: string[]): void {
+    for (const sm of this.stateMachines.values()) {
+      if (sm.stateMachineArn === arn) {
+        for (const key of tagKeys) delete sm.tags[key];
+        return;
+      }
+    }
+  }
+
+  createActivity(name: string, region: string): Activity {
+    const key = this.regionKey(region, `activity:${name}`);
+    if (this.activities.has(key)) {
+      throw new AwsError("ActivityAlreadyExists", `Activity '${name}' already exists.`, 409);
+    }
+    const activity: Activity = {
+      activityArn: buildArn("states", region, this.accountId, "activity:", name),
+      name,
+      creationDate: Date.now() / 1000,
+    };
+    this.activities.set(key, activity);
+    return activity;
+  }
+
+  describeActivity(activityArn: string): Activity {
+    for (const a of this.activities.values()) {
+      if (a.activityArn === activityArn) return a;
+    }
+    throw new AwsError("ActivityDoesNotExist", `Activity '${activityArn}' not found.`, 400);
+  }
+
+  listActivities(region: string): Activity[] {
+    return this.activities.values().filter((a) => a.activityArn.includes(`:${region}:`));
+  }
+
+  deleteActivity(activityArn: string): void {
+    for (const key of this.activities.keys()) {
+      const a = this.activities.get(key)!;
+      if (a.activityArn === activityArn) {
+        this.activities.delete(key);
+        return;
+      }
+    }
+  }
+
+  sendTaskSuccess(taskToken: string, output: string): void {
+    this.taskResults.set(taskToken, { status: "succeeded", output });
+  }
+
+  sendTaskFailure(taskToken: string, error: string | undefined, cause: string | undefined): void {
+    this.taskResults.set(taskToken, { status: "failed", error, cause });
+  }
+
+  sendTaskHeartbeat(_taskToken: string): void {
+    // No-op in emulator — just acknowledge receipt
   }
 
   private async runExecution(execution: Execution, sm: StateMachine): Promise<void> {

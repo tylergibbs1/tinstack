@@ -10,6 +10,21 @@ import {
   CreateEventSourceMappingCommand,
   ListEventSourceMappingsCommand,
   DeleteEventSourceMappingCommand,
+  PublishVersionCommand,
+  ListVersionsByFunctionCommand,
+  CreateAliasCommand,
+  GetAliasCommand,
+  ListAliasesCommand,
+  UpdateAliasCommand,
+  DeleteAliasCommand,
+  PublishLayerVersionCommand,
+  GetLayerVersionCommand,
+  ListLayersCommand,
+  ListLayerVersionsCommand,
+  DeleteLayerVersionCommand,
+  AddPermissionCommand,
+  GetPolicyCommand,
+  RemovePermissionCommand,
 } from "@aws-sdk/client-lambda";
 import { startServer, stopServer, clientConfig } from "./helpers";
 
@@ -103,6 +118,161 @@ describe("Lambda", () => {
     expect(list.EventSourceMappings?.length).toBeGreaterThan(0);
 
     await lambda.send(new DeleteEventSourceMappingCommand({ UUID: create.UUID! }));
+  });
+
+  test("PublishVersion", async () => {
+    const res = await lambda.send(new PublishVersionCommand({
+      FunctionName: functionName,
+      Description: "v1 release",
+    }));
+    expect(res.Version).toBe("1");
+    expect(res.FunctionName).toBe(functionName);
+  });
+
+  test("ListVersionsByFunction", async () => {
+    const res = await lambda.send(new ListVersionsByFunctionCommand({
+      FunctionName: functionName,
+    }));
+    expect(res.Versions!.length).toBeGreaterThanOrEqual(2); // $LATEST + version 1
+    expect(res.Versions!.some((v) => v.Version === "$LATEST")).toBe(true);
+    expect(res.Versions!.some((v) => v.Version === "1")).toBe(true);
+  });
+
+  test("CreateAlias", async () => {
+    const res = await lambda.send(new CreateAliasCommand({
+      FunctionName: functionName,
+      Name: "prod",
+      FunctionVersion: "1",
+      Description: "Production alias",
+    }));
+    expect(res.Name).toBe("prod");
+    expect(res.FunctionVersion).toBe("1");
+    expect(res.Description).toBe("Production alias");
+    expect(res.AliasArn).toContain(functionName);
+  });
+
+  test("GetAlias", async () => {
+    const res = await lambda.send(new GetAliasCommand({
+      FunctionName: functionName,
+      Name: "prod",
+    }));
+    expect(res.Name).toBe("prod");
+    expect(res.FunctionVersion).toBe("1");
+  });
+
+  test("ListAliases", async () => {
+    const res = await lambda.send(new ListAliasesCommand({
+      FunctionName: functionName,
+    }));
+    expect(res.Aliases!.some((a) => a.Name === "prod")).toBe(true);
+  });
+
+  test("UpdateAlias", async () => {
+    // Publish a second version to update alias to
+    await lambda.send(new PublishVersionCommand({ FunctionName: functionName }));
+    const res = await lambda.send(new UpdateAliasCommand({
+      FunctionName: functionName,
+      Name: "prod",
+      FunctionVersion: "2",
+      Description: "Updated prod",
+    }));
+    expect(res.FunctionVersion).toBe("2");
+    expect(res.Description).toBe("Updated prod");
+  });
+
+  test("DeleteAlias", async () => {
+    await lambda.send(new DeleteAliasCommand({
+      FunctionName: functionName,
+      Name: "prod",
+    }));
+    const res = await lambda.send(new ListAliasesCommand({
+      FunctionName: functionName,
+    }));
+    expect(res.Aliases!.some((a) => a.Name === "prod")).toBe(false);
+  });
+
+  test("PublishLayerVersion", async () => {
+    const res = await lambda.send(new PublishLayerVersionCommand({
+      LayerName: "test-layer",
+      Description: "A test layer",
+      Content: { ZipFile: Buffer.from("fake-layer-content") },
+      CompatibleRuntimes: ["nodejs20.x", "nodejs18.x"],
+    }));
+    expect(res.Version).toBe(1);
+    expect(res.Description).toBe("A test layer");
+    expect(res.CompatibleRuntimes).toContain("nodejs20.x");
+    expect(res.LayerVersionArn).toContain("test-layer");
+  });
+
+  test("GetLayerVersion", async () => {
+    const res = await lambda.send(new GetLayerVersionCommand({
+      LayerName: "test-layer",
+      VersionNumber: 1,
+    }));
+    expect(res.Version).toBe(1);
+    expect(res.Description).toBe("A test layer");
+  });
+
+  test("ListLayers", async () => {
+    const res = await lambda.send(new ListLayersCommand({}));
+    expect(res.Layers!.some((l) => l.LayerName === "test-layer")).toBe(true);
+  });
+
+  test("ListLayerVersions", async () => {
+    // Publish a second version
+    await lambda.send(new PublishLayerVersionCommand({
+      LayerName: "test-layer",
+      Description: "v2",
+      Content: { ZipFile: Buffer.from("fake-layer-v2") },
+      CompatibleRuntimes: ["nodejs20.x"],
+    }));
+    const res = await lambda.send(new ListLayerVersionsCommand({
+      LayerName: "test-layer",
+    }));
+    expect(res.LayerVersions!.length).toBe(2);
+  });
+
+  test("DeleteLayerVersion", async () => {
+    await lambda.send(new DeleteLayerVersionCommand({
+      LayerName: "test-layer",
+      VersionNumber: 1,
+    }));
+    const res = await lambda.send(new ListLayerVersionsCommand({
+      LayerName: "test-layer",
+    }));
+    expect(res.LayerVersions!.length).toBe(1);
+    expect(res.LayerVersions![0].Version).toBe(2);
+  });
+
+  test("AddPermission and GetPolicy", async () => {
+    await lambda.send(new AddPermissionCommand({
+      FunctionName: functionName,
+      StatementId: "allow-s3",
+      Action: "lambda:InvokeFunction",
+      Principal: "s3.amazonaws.com",
+      SourceArn: "arn:aws:s3:::my-bucket",
+    }));
+
+    const res = await lambda.send(new GetPolicyCommand({
+      FunctionName: functionName,
+    }));
+    expect(res.Policy).toBeDefined();
+    const policy = JSON.parse(res.Policy!);
+    expect(policy.Statement.some((s: any) => s.Sid === "allow-s3")).toBe(true);
+  });
+
+  test("RemovePermission", async () => {
+    await lambda.send(new RemovePermissionCommand({
+      FunctionName: functionName,
+      StatementId: "allow-s3",
+    }));
+    // Policy should now be empty / not found
+    try {
+      await lambda.send(new GetPolicyCommand({ FunctionName: functionName }));
+      expect(true).toBe(false); // should not reach here
+    } catch (e: any) {
+      expect(e.name).toBe("ResourceNotFoundException");
+    }
   });
 
   test("DeleteFunction", async () => {

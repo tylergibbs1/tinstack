@@ -28,6 +28,28 @@ export class KmsHandler {
         case "GetKeyPolicy": return this.getKeyPolicy(body, ctx);
         case "GetKeyRotationStatus": return this.getKeyRotationStatus(body, ctx);
         case "ListResourceTags": return this.listResourceTags(body, ctx);
+        case "TagResource":
+          this.service.tagResource(body.KeyId, body.Tags ?? [], ctx.region);
+          return this.json({}, ctx);
+        case "UntagResource":
+          this.service.untagResource(body.KeyId, body.TagKeys ?? [], ctx.region);
+          return this.json({}, ctx);
+        case "EnableKeyRotation":
+          this.service.enableKeyRotation(body.KeyId, ctx.region);
+          return this.json({}, ctx);
+        case "DisableKeyRotation":
+          this.service.disableKeyRotation(body.KeyId, ctx.region);
+          return this.json({}, ctx);
+        case "GenerateRandom":
+          return this.json({ Plaintext: this.service.generateRandom(body.NumberOfBytes) }, ctx);
+        case "Sign": return this.sign(body, ctx);
+        case "Verify": return this.verify(body, ctx);
+        case "ReEncrypt": return this.reEncrypt(body, ctx);
+        case "CreateGrant": return this.createGrant(body, ctx);
+        case "ListGrants": return this.listGrants(body, ctx);
+        case "RevokeGrant":
+          this.service.revokeGrant(body.KeyId, body.GrantId, ctx.region);
+          return this.json({}, ctx);
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }
@@ -99,13 +121,45 @@ export class KmsHandler {
   }
 
   private getKeyRotationStatus(body: any, ctx: RequestContext): Response {
-    this.service.describeKey(body.KeyId, ctx.region);
-    return this.json({ KeyRotationEnabled: false }, ctx);
+    const enabled = this.service.getKeyRotationStatus(body.KeyId, ctx.region);
+    return this.json({ KeyRotationEnabled: enabled }, ctx);
   }
 
   private listResourceTags(body: any, ctx: RequestContext): Response {
     const tags = this.service.listResourceTags(body.KeyId, ctx.region);
     return this.json({ Tags: tags, Truncated: false }, ctx);
+  }
+
+  private sign(body: any, ctx: RequestContext): Response {
+    const result = this.service.sign(body.KeyId, body.Message, body.SigningAlgorithm, ctx.region);
+    return this.json({ Signature: result.signature, KeyId: result.keyId, SigningAlgorithm: result.signingAlgorithm }, ctx);
+  }
+
+  private verify(body: any, ctx: RequestContext): Response {
+    const result = this.service.verify(body.KeyId, body.Message, body.Signature, body.SigningAlgorithm, ctx.region);
+    return this.json({ SignatureValid: result.signatureValid, KeyId: result.keyId, SigningAlgorithm: result.signingAlgorithm }, ctx);
+  }
+
+  private reEncrypt(body: any, ctx: RequestContext): Response {
+    const result = this.service.reEncrypt(body.CiphertextBlob, body.DestinationKeyId, ctx.region);
+    return this.json({ CiphertextBlob: result.ciphertextBlob, SourceKeyId: result.sourceKeyId, KeyId: result.keyId }, ctx);
+  }
+
+  private createGrant(body: any, ctx: RequestContext): Response {
+    const result = this.service.createGrant(body.KeyId, body.GranteePrincipal, body.Operations ?? [], body.RetiringPrincipal, body.Name, ctx.region);
+    return this.json({ GrantId: result.grantId, GrantToken: result.grantToken }, ctx);
+  }
+
+  private listGrants(body: any, ctx: RequestContext): Response {
+    const grants = this.service.listGrants(body.KeyId, ctx.region);
+    return this.json({
+      Grants: grants.map((g) => ({
+        GrantId: g.grantId, KeyId: g.keyId,
+        GranteePrincipal: g.granteePrincipal, RetiringPrincipal: g.retiringPrincipal,
+        Operations: g.operations, CreationDate: g.creationDate, Name: g.name,
+      })),
+      Truncated: false,
+    }, ctx);
   }
 
   private keyMeta(key: any): any {

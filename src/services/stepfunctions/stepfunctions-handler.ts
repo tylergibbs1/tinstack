@@ -36,6 +36,39 @@ export class StepFunctionsHandler {
         case "ListStateMachineVersions": {
           return this.json({ stateMachineVersions: [] }, ctx);
         }
+        case "UntagResource": {
+          const tagKeys = (body.tagKeys ?? []) as string[];
+          this.service.untagResource(body.resourceArn, tagKeys);
+          return this.json({}, ctx);
+        }
+        case "CreateActivity": {
+          const activity = this.service.createActivity(body.name, ctx.region);
+          return this.json({ activityArn: activity.activityArn, creationDate: activity.creationDate }, ctx);
+        }
+        case "DescribeActivity": {
+          const activity = this.service.describeActivity(body.activityArn);
+          return this.json({ activityArn: activity.activityArn, name: activity.name, creationDate: activity.creationDate }, ctx);
+        }
+        case "ListActivities": {
+          const activities = this.service.listActivities(ctx.region);
+          return this.json({ activities: activities.map((a) => ({ activityArn: a.activityArn, name: a.name, creationDate: a.creationDate })) }, ctx);
+        }
+        case "DeleteActivity": {
+          this.service.deleteActivity(body.activityArn);
+          return this.json({}, ctx);
+        }
+        case "SendTaskSuccess": {
+          this.service.sendTaskSuccess(body.taskToken, body.output);
+          return this.json({}, ctx);
+        }
+        case "SendTaskFailure": {
+          this.service.sendTaskFailure(body.taskToken, body.error, body.cause);
+          return this.json({}, ctx);
+        }
+        case "SendTaskHeartbeat": {
+          this.service.sendTaskHeartbeat(body.taskToken);
+          return this.json({}, ctx);
+        }
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }

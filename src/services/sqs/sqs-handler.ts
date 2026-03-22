@@ -40,6 +40,12 @@ export class SqsJsonHandler {
           return this.untagQueue(body, ctx);
         case "ListQueueTags":
           return this.listQueueTags(body, ctx);
+        case "ChangeMessageVisibilityBatch":
+          return this.changeMessageVisibilityBatch(body, ctx);
+        case "AddPermission":
+          return this.addPermission(body, ctx);
+        case "RemovePermission":
+          return this.removePermission(body, ctx);
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }
@@ -197,5 +203,28 @@ export class SqsJsonHandler {
   private listQueueTags(body: any, ctx: RequestContext): Response {
     const tags = this.service.listQueueTags(body.QueueUrl, ctx.region);
     return this.json({ Tags: tags }, ctx);
+  }
+
+  private changeMessageVisibilityBatch(body: any, ctx: RequestContext): Response {
+    const entries = (body.Entries ?? []).map((e: any) => ({
+      id: e.Id,
+      receiptHandle: e.ReceiptHandle,
+      visibilityTimeout: e.VisibilityTimeout,
+    }));
+    const result = this.service.changeMessageVisibilityBatch(body.QueueUrl, entries, ctx.region);
+    return this.json({
+      Successful: result.successful.map((s) => ({ Id: s.id })),
+      Failed: result.failed.map((f) => ({ Id: f.id, Code: f.code, Message: f.message, SenderFault: f.senderFault })),
+    }, ctx);
+  }
+
+  private addPermission(body: any, ctx: RequestContext): Response {
+    this.service.addPermission(body.QueueUrl, body.Label, body.AWSAccountIds ?? [], body.Actions ?? [], ctx.region);
+    return this.json({}, ctx);
+  }
+
+  private removePermission(body: any, ctx: RequestContext): Response {
+    this.service.removePermission(body.QueueUrl, body.Label, ctx.region);
+    return this.json({}, ctx);
   }
 }

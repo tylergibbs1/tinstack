@@ -28,6 +28,38 @@ export class SsmHandler {
           return this.addTagsToResource(body, ctx);
         case "ListTagsForResource":
           return this.listTagsForResource(body, ctx);
+        case "RemoveTagsFromResource":
+          return this.removeTagsFromResource(body, ctx);
+        case "CreateDocument":
+          return this.createDocument(body, ctx);
+        case "GetDocument":
+          return this.getDocumentHandler(body, ctx);
+        case "DescribeDocument":
+          return this.describeDocument(body, ctx);
+        case "ListDocuments":
+          return this.listDocumentsHandler(body, ctx);
+        case "UpdateDocument":
+          return this.updateDocument(body, ctx);
+        case "DeleteDocument":
+          return this.deleteDocument(body, ctx);
+        case "SendCommand":
+          return this.sendCommand(body, ctx);
+        case "GetCommandInvocation":
+          return this.getCommandInvocation(body, ctx);
+        case "ListCommands":
+          return this.listCommands(body, ctx);
+        case "ListCommandInvocations":
+          return this.listCommandInvocations(body, ctx);
+        case "CreateMaintenanceWindow":
+          return this.createMaintenanceWindow(body, ctx);
+        case "GetMaintenanceWindow":
+          return this.getMaintenanceWindow(body, ctx);
+        case "DescribeMaintenanceWindows":
+          return this.describeMaintenanceWindows(body, ctx);
+        case "UpdateMaintenanceWindow":
+          return this.updateMaintenanceWindow(body, ctx);
+        case "DeleteMaintenanceWindow":
+          return this.deleteMaintenanceWindow(body, ctx);
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }
@@ -135,5 +167,203 @@ export class SsmHandler {
     return this.json({
       TagList: Object.entries(tags).map(([Key, Value]) => ({ Key, Value })),
     }, ctx);
+  }
+
+  private removeTagsFromResource(body: any, ctx: RequestContext): Response {
+    const tagKeys: string[] = (body.TagKeys ?? []);
+    this.service.removeTagsFromResource(body.ResourceId, tagKeys, ctx.region);
+    return this.json({}, ctx);
+  }
+
+  private createDocument(body: any, ctx: RequestContext): Response {
+    const tags: Record<string, string> = {};
+    if (body.Tags) for (const t of body.Tags) tags[t.Key] = t.Value;
+    const doc = this.service.createDocument(body.Name, body.Content, body.DocumentType, body.DocumentFormat, tags, ctx.region);
+    return this.json({
+      DocumentDescription: {
+        Name: doc.name, DocumentType: doc.documentType, DocumentFormat: doc.documentFormat,
+        DocumentVersion: doc.version, Status: doc.status, Description: doc.description,
+        CreatedDate: doc.createdDate, Tags: Object.entries(doc.tags).map(([Key, Value]) => ({ Key, Value })),
+      },
+    }, ctx);
+  }
+
+  private getDocumentHandler(body: any, ctx: RequestContext): Response {
+    const doc = this.service.getDocument(body.Name, ctx.region);
+    return this.json({
+      Name: doc.name, Content: doc.content, DocumentType: doc.documentType,
+      DocumentFormat: doc.documentFormat, DocumentVersion: doc.version, Status: doc.status,
+    }, ctx);
+  }
+
+  private describeDocument(body: any, ctx: RequestContext): Response {
+    const doc = this.service.describeDocument(body.Name, ctx.region);
+    return this.json({
+      Document: {
+        Name: doc.name, DocumentType: doc.documentType, DocumentFormat: doc.documentFormat,
+        DocumentVersion: doc.version, Status: doc.status, Description: doc.description,
+        CreatedDate: doc.createdDate,
+      },
+    }, ctx);
+  }
+
+  private listDocumentsHandler(body: any, ctx: RequestContext): Response {
+    const docs = this.service.listDocuments(ctx.region);
+    return this.json({
+      DocumentIdentifiers: docs.map((d) => ({
+        Name: d.name, DocumentType: d.documentType, DocumentFormat: d.documentFormat,
+        DocumentVersion: d.version,
+      })),
+    }, ctx);
+  }
+
+  private updateDocument(body: any, ctx: RequestContext): Response {
+    const doc = this.service.updateDocument(body.Name, body.Content, body.DocumentVersion, ctx.region);
+    return this.json({
+      DocumentDescription: {
+        Name: doc.name, DocumentType: doc.documentType, DocumentFormat: doc.documentFormat,
+        DocumentVersion: doc.version, Status: doc.status, Description: doc.description,
+        CreatedDate: doc.createdDate,
+      },
+    }, ctx);
+  }
+
+  private deleteDocument(body: any, ctx: RequestContext): Response {
+    this.service.deleteDocument(body.Name, ctx.region);
+    return this.json({}, ctx);
+  }
+
+  // --- Commands ---
+
+  private sendCommand(body: any, ctx: RequestContext): Response {
+    const cmd = this.service.sendCommand(
+      body.DocumentName,
+      body.InstanceIds ?? [],
+      body.Parameters ?? {},
+      body.Comment,
+      body.TimeoutSeconds,
+      ctx.region,
+    );
+    return this.json({
+      Command: {
+        CommandId: cmd.commandId,
+        DocumentName: cmd.documentName,
+        InstanceIds: cmd.instanceIds,
+        Parameters: cmd.parameters,
+        Comment: cmd.comment,
+        StatusDetails: cmd.status,
+        Status: cmd.status,
+        RequestedDateTime: cmd.requestedDateTime,
+      },
+    }, ctx);
+  }
+
+  private getCommandInvocation(body: any, ctx: RequestContext): Response {
+    const inv = this.service.getCommandInvocation(body.CommandId, body.InstanceId, ctx.region);
+    return this.json({
+      CommandId: inv.commandId,
+      InstanceId: inv.instanceId,
+      Status: inv.status,
+      StatusDetails: inv.statusDetails,
+      StandardOutputContent: inv.standardOutputContent,
+      StandardErrorContent: inv.standardErrorContent,
+      ResponseCode: inv.responseCode,
+    }, ctx);
+  }
+
+  private listCommands(body: any, ctx: RequestContext): Response {
+    const cmds = this.service.listCommands(body.CommandId, ctx.region);
+    return this.json({
+      Commands: cmds.map((c) => ({
+        CommandId: c.commandId,
+        DocumentName: c.documentName,
+        InstanceIds: c.instanceIds,
+        Status: c.status,
+        StatusDetails: c.status,
+        RequestedDateTime: c.requestedDateTime,
+        Comment: c.comment,
+      })),
+    }, ctx);
+  }
+
+  private listCommandInvocations(body: any, ctx: RequestContext): Response {
+    const invs = this.service.listCommandInvocations(body.CommandId, ctx.region);
+    return this.json({
+      CommandInvocations: invs.map((i) => ({
+        CommandId: i.commandId,
+        InstanceId: i.instanceId,
+        Status: i.status,
+        StatusDetails: i.statusDetails,
+      })),
+    }, ctx);
+  }
+
+  // --- Maintenance Windows ---
+
+  private createMaintenanceWindow(body: any, ctx: RequestContext): Response {
+    const mw = this.service.createMaintenanceWindow(
+      body.Name,
+      body.Schedule,
+      body.Duration,
+      body.Cutoff,
+      body.AllowUnassociatedTargets ?? false,
+      ctx.region,
+    );
+    return this.json({ WindowId: mw.windowId }, ctx);
+  }
+
+  private getMaintenanceWindow(body: any, ctx: RequestContext): Response {
+    const mw = this.service.getMaintenanceWindow(body.WindowId, ctx.region);
+    return this.json({
+      WindowId: mw.windowId,
+      Name: mw.name,
+      Schedule: mw.schedule,
+      Duration: mw.duration,
+      Cutoff: mw.cutoff,
+      AllowUnassociatedTargets: mw.allowUnassociatedTargets,
+      Enabled: mw.enabled,
+      CreatedDate: mw.createdDate,
+      ModifiedDate: mw.modifiedDate,
+    }, ctx);
+  }
+
+  private describeMaintenanceWindows(body: any, ctx: RequestContext): Response {
+    const windows = this.service.describeMaintenanceWindows(ctx.region);
+    return this.json({
+      WindowIdentities: windows.map((mw) => ({
+        WindowId: mw.windowId,
+        Name: mw.name,
+        Schedule: mw.schedule,
+        Duration: mw.duration,
+        Cutoff: mw.cutoff,
+        Enabled: mw.enabled,
+      })),
+    }, ctx);
+  }
+
+  private updateMaintenanceWindow(body: any, ctx: RequestContext): Response {
+    const mw = this.service.updateMaintenanceWindow(
+      body.WindowId,
+      body.Name,
+      body.Schedule,
+      body.Duration,
+      body.Cutoff,
+      body.Enabled,
+      ctx.region,
+    );
+    return this.json({
+      WindowId: mw.windowId,
+      Name: mw.name,
+      Schedule: mw.schedule,
+      Duration: mw.duration,
+      Cutoff: mw.cutoff,
+      AllowUnassociatedTargets: mw.allowUnassociatedTargets,
+      Enabled: mw.enabled,
+    }, ctx);
+  }
+
+  private deleteMaintenanceWindow(body: any, ctx: RequestContext): Response {
+    this.service.deleteMaintenanceWindow(body.WindowId, ctx.region);
+    return this.json({ WindowId: body.WindowId }, ctx);
   }
 }

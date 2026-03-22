@@ -55,6 +55,88 @@ export class KinesisHandler {
           return this.json({}, ctx);
         }
         case "RemoveTagsFromStream": return this.json({}, ctx);
+        case "ListShards": {
+          const shards = this.service.listShards(body.StreamName, ctx.region);
+          return this.json({
+            Shards: shards.map((sh) => ({
+              ShardId: sh.shardId,
+              ParentShardId: sh.parentShardId,
+              HashKeyRange: { StartingHashKey: sh.hashKeyRange.startingHashKey, EndingHashKey: sh.hashKeyRange.endingHashKey },
+              SequenceNumberRange: { StartingSequenceNumber: sh.sequenceNumberRange.startingSequenceNumber },
+            })),
+          }, ctx);
+        }
+        case "UpdateShardCount": {
+          const result = this.service.updateShardCount(body.StreamName, body.TargetShardCount, ctx.region);
+          return this.json({
+            StreamName: result.streamName,
+            CurrentShardCount: result.currentShardCount,
+            TargetShardCount: result.targetShardCount,
+          }, ctx);
+        }
+        case "RegisterStreamConsumer": {
+          const consumer = this.service.registerStreamConsumer(body.ConsumerName, body.StreamARN, ctx.region);
+          return this.json({
+            Consumer: {
+              ConsumerName: consumer.consumerName,
+              ConsumerARN: consumer.consumerArn,
+              ConsumerStatus: consumer.consumerStatus,
+              ConsumerCreationTimestamp: consumer.consumerCreationTimestamp,
+            },
+          }, ctx);
+        }
+        case "DescribeStreamConsumer": {
+          const consumer = this.service.describeStreamConsumer(body.ConsumerARN, body.ConsumerName, body.StreamARN);
+          return this.json({
+            ConsumerDescription: {
+              ConsumerName: consumer.consumerName,
+              ConsumerARN: consumer.consumerArn,
+              ConsumerStatus: consumer.consumerStatus,
+              ConsumerCreationTimestamp: consumer.consumerCreationTimestamp,
+              StreamARN: consumer.streamArn,
+            },
+          }, ctx);
+        }
+        case "ListStreamConsumers": {
+          const consumers = this.service.listStreamConsumers(body.StreamARN);
+          return this.json({
+            Consumers: consumers.map((c) => ({
+              ConsumerName: c.consumerName,
+              ConsumerARN: c.consumerArn,
+              ConsumerStatus: c.consumerStatus,
+              ConsumerCreationTimestamp: c.consumerCreationTimestamp,
+            })),
+          }, ctx);
+        }
+        case "DeregisterStreamConsumer": {
+          this.service.deregisterStreamConsumer(body.ConsumerARN, body.ConsumerName, body.StreamARN);
+          return this.json({}, ctx);
+        }
+        case "StartStreamEncryption": {
+          this.service.startStreamEncryption(body.StreamName, body.EncryptionType, body.KeyId, ctx.region);
+          return this.json({}, ctx);
+        }
+        case "StopStreamEncryption": {
+          this.service.stopStreamEncryption(body.StreamName, body.EncryptionType, body.KeyId, ctx.region);
+          return this.json({}, ctx);
+        }
+        case "MergeShards": {
+          this.service.mergeShards(body.StreamName, body.ShardToMerge, body.AdjacentShardToMerge, ctx.region);
+          return this.json({}, ctx);
+        }
+        case "SplitShard": {
+          this.service.splitShard(body.StreamName, body.ShardToSplit, body.NewStartingHashKey, ctx.region);
+          return this.json({}, ctx);
+        }
+        case "DescribeLimits": {
+          const limits = this.service.describeLimits(ctx.region);
+          return this.json({
+            ShardLimit: limits.shardLimit,
+            OpenShardCount: limits.openShardCount,
+            OnDemandStreamCount: limits.onDemandStreamCount,
+            OnDemandStreamCountLimit: limits.onDemandStreamCountLimit,
+          }, ctx);
+        }
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }

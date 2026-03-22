@@ -27,15 +27,74 @@ export interface LogEvent {
   ingestionTime: number;
 }
 
+export interface MetricFilter {
+  filterName: string;
+  filterPattern: string;
+  logGroupName: string;
+  metricTransformations: MetricTransformation[];
+  creationTime: number;
+}
+
+export interface MetricTransformation {
+  metricName: string;
+  metricNamespace: string;
+  metricValue: string;
+  defaultValue?: number;
+}
+
+export interface SubscriptionFilter {
+  filterName: string;
+  filterPattern: string;
+  logGroupName: string;
+  destinationArn: string;
+  roleArn?: string;
+  creationTime: number;
+}
+
+export interface ExportTask {
+  taskId: string;
+  taskName?: string;
+  logGroupName: string;
+  fromTime: number;
+  to: number;
+  destination: string;
+  destinationPrefix?: string;
+  status: { code: string; message?: string };
+}
+
+export interface ResourcePolicy {
+  policyName: string;
+  policyDocument: string;
+  lastUpdatedTime: number;
+}
+
+export interface LogDestination {
+  destinationName: string;
+  targetArn: string;
+  roleArn?: string;
+  arn: string;
+  creationTime: number;
+}
+
 export class CloudWatchLogsService {
   private logGroups: StorageBackend<string, LogGroup>;
   private logStreams: StorageBackend<string, LogStream>;
   private logEvents: StorageBackend<string, LogEvent[]>;
+  private metricFilters: StorageBackend<string, MetricFilter>;
+  private subscriptionFilters: StorageBackend<string, SubscriptionFilter>;
+  private exportTasks: StorageBackend<string, ExportTask>;
+  private resourcePolicies: StorageBackend<string, ResourcePolicy>;
+  private destinations: StorageBackend<string, LogDestination>;
 
   constructor(private accountId: string) {
     this.logGroups = new InMemoryStorage();
     this.logStreams = new InMemoryStorage();
     this.logEvents = new InMemoryStorage();
+    this.metricFilters = new InMemoryStorage();
+    this.subscriptionFilters = new InMemoryStorage();
+    this.exportTasks = new InMemoryStorage();
+    this.resourcePolicies = new InMemoryStorage();
+    this.destinations = new InMemoryStorage();
   }
 
   private regionKey(region: string, name: string): string {
@@ -214,5 +273,165 @@ export class CloudWatchLogsService {
     const key = this.regionKey(region, logGroupName);
     const group = this.logGroups.get(key);
     if (group) for (const k of tagKeys) delete group.tags[k];
+  }
+
+  // --- Metric Filters ---
+
+  putMetricFilter(logGroupName: string, filterName: string, filterPattern: string, metricTransformations: MetricTransformation[], region: string): void {
+    const gKey = this.regionKey(region, logGroupName);
+    if (!this.logGroups.has(gKey)) throw new AwsError("ResourceNotFoundException", `Log group ${logGroupName} not found.`, 400);
+    const key = `${gKey}#mf#${filterName}`;
+    this.metricFilters.set(key, {
+      filterName,
+      filterPattern,
+      logGroupName,
+      metricTransformations,
+      creationTime: this.metricFilters.get(key)?.creationTime ?? Date.now(),
+    });
+  }
+
+  describeMetricFilters(logGroupName: string, region: string): MetricFilter[] {
+    const gKey = this.regionKey(region, logGroupName);
+    const prefix = `${gKey}#mf#`;
+    return this.metricFilters.values().filter((f) => {
+      const key = `${gKey}#mf#${f.filterName}`;
+      return this.metricFilters.has(key) && key.startsWith(prefix);
+    });
+  }
+
+  deleteMetricFilter(logGroupName: string, filterName: string, region: string): void {
+    const gKey = this.regionKey(region, logGroupName);
+    const key = `${gKey}#mf#${filterName}`;
+    if (!this.metricFilters.has(key)) throw new AwsError("ResourceNotFoundException", `Metric filter ${filterName} not found.`, 400);
+    this.metricFilters.delete(key);
+  }
+
+  // --- Subscription Filters ---
+
+  putSubscriptionFilter(logGroupName: string, filterName: string, filterPattern: string, destinationArn: string, roleArn: string | undefined, region: string): void {
+    const gKey = this.regionKey(region, logGroupName);
+    if (!this.logGroups.has(gKey)) throw new AwsError("ResourceNotFoundException", `Log group ${logGroupName} not found.`, 400);
+    const key = `${gKey}#sf#${filterName}`;
+    this.subscriptionFilters.set(key, {
+      filterName,
+      filterPattern,
+      logGroupName,
+      destinationArn,
+      roleArn,
+      creationTime: this.subscriptionFilters.get(key)?.creationTime ?? Date.now(),
+    });
+  }
+
+  describeSubscriptionFilters(logGroupName: string, region: string): SubscriptionFilter[] {
+    const gKey = this.regionKey(region, logGroupName);
+    const prefix = `${gKey}#sf#`;
+    return this.subscriptionFilters.values().filter((f) => {
+      const key = `${gKey}#sf#${f.filterName}`;
+      return this.subscriptionFilters.has(key) && key.startsWith(prefix);
+    });
+  }
+
+  deleteSubscriptionFilter(logGroupName: string, filterName: string, region: string): void {
+    const gKey = this.regionKey(region, logGroupName);
+    const key = `${gKey}#sf#${filterName}`;
+    if (!this.subscriptionFilters.has(key)) throw new AwsError("ResourceNotFoundException", `Subscription filter ${filterName} not found.`, 400);
+    this.subscriptionFilters.delete(key);
+  }
+
+  // --- Export Tasks ---
+
+  createExportTask(
+    logGroupName: string,
+    fromTime: number,
+    to: number,
+    destination: string,
+    destinationPrefix: string | undefined,
+    taskName: string | undefined,
+    region: string,
+  ): string {
+    const gKey = this.regionKey(region, logGroupName);
+    if (!this.logGroups.has(gKey)) throw new AwsError("ResourceNotFoundException", `Log group ${logGroupName} not found.`, 400);
+
+    const taskId = crypto.randomUUID();
+    this.exportTasks.set(taskId, {
+      taskId,
+      taskName,
+      logGroupName,
+      fromTime,
+      to,
+      destination,
+      destinationPrefix,
+      status: { code: "COMPLETED" },
+    });
+    return taskId;
+  }
+
+  describeExportTasks(taskId: string | undefined, region: string): ExportTask[] {
+    if (taskId) {
+      const task = this.exportTasks.get(taskId);
+      return task ? [task] : [];
+    }
+    return this.exportTasks.values();
+  }
+
+  cancelExportTask(taskId: string, region: string): void {
+    const task = this.exportTasks.get(taskId);
+    if (!task) throw new AwsError("ResourceNotFoundException", `Export task ${taskId} not found.`, 400);
+    task.status = { code: "CANCELLED" };
+  }
+
+  // --- Resource Policies ---
+
+  putResourcePolicy(policyName: string, policyDocument: string, region: string): ResourcePolicy {
+    const key = this.regionKey(region, policyName);
+    const policy: ResourcePolicy = {
+      policyName,
+      policyDocument,
+      lastUpdatedTime: Date.now(),
+    };
+    this.resourcePolicies.set(key, policy);
+    return policy;
+  }
+
+  describeResourcePolicies(region: string): ResourcePolicy[] {
+    return this.resourcePolicies.values().filter((p) =>
+      this.resourcePolicies.has(this.regionKey(region, p.policyName)),
+    );
+  }
+
+  deleteResourcePolicy(policyName: string, region: string): void {
+    const key = this.regionKey(region, policyName);
+    if (!this.resourcePolicies.has(key)) throw new AwsError("ResourceNotFoundException", `Resource policy ${policyName} not found.`, 400);
+    this.resourcePolicies.delete(key);
+  }
+
+  // --- Destinations ---
+
+  putDestination(destinationName: string, targetArn: string, roleArn: string | undefined, region: string): LogDestination {
+    const key = this.regionKey(region, destinationName);
+    const existing = this.destinations.get(key);
+    const dest: LogDestination = {
+      destinationName,
+      targetArn,
+      roleArn,
+      arn: buildArn("logs", region, this.accountId, "destination:", destinationName),
+      creationTime: existing?.creationTime ?? Date.now(),
+    };
+    this.destinations.set(key, dest);
+    return dest;
+  }
+
+  describeDestinations(destinationNamePrefix: string | undefined, region: string): LogDestination[] {
+    return this.destinations.values().filter((d) => {
+      if (!this.destinations.has(this.regionKey(region, d.destinationName))) return false;
+      if (destinationNamePrefix && !d.destinationName.startsWith(destinationNamePrefix)) return false;
+      return true;
+    });
+  }
+
+  deleteDestination(destinationName: string, region: string): void {
+    const key = this.regionKey(region, destinationName);
+    if (!this.destinations.has(key)) throw new AwsError("ResourceNotFoundException", `Destination ${destinationName} not found.`, 400);
+    this.destinations.delete(key);
   }
 }

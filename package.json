@@ -48,5 +48,23 @@
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "@aws-sdk/client-appconfig": "^3.1014.0",
+    "@aws-sdk/client-appsync": "^3.1014.0",
+    "@aws-sdk/client-athena": "^3.1014.0",
+    "@aws-sdk/client-bedrock": "^3.1014.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1014.0",
+    "@aws-sdk/client-cloudformation": "^3.1014.0",
+    "@aws-sdk/client-cloudfront": "^3.1014.0",
+    "@aws-sdk/client-ecs": "^3.1014.0",
+    "@aws-sdk/client-efs": "^3.1014.0",
+    "@aws-sdk/client-firehose": "^3.1014.0",
+    "@aws-sdk/client-glue": "^3.1014.0",
+    "@aws-sdk/client-mediaconvert": "^3.1014.0",
+    "@aws-sdk/client-rds": "^3.1014.0",
+    "@aws-sdk/client-scheduler": "^3.1014.0",
+    "@aws-sdk/client-textract": "^3.1014.0",
+    "@aws-sdk/client-wafv2": "^3.1014.0"
   }
 }

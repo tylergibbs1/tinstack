@@ -55,4 +55,32 @@ export class StsService {
       expiration: new Date(Date.now() + (durationSeconds || 3600) * 1000).toISOString(),
     };
   }
+
+  assumeRoleWithWebIdentity(
+    roleArn: string,
+    roleSessionName: string,
+    webIdentityToken: string,
+    durationSeconds: number,
+    region: string,
+  ): AssumedRole & { subjectFromWebIdentityToken: string } {
+    const role = this.assumeRole(roleArn, roleSessionName, durationSeconds, region);
+    return {
+      ...role,
+      subjectFromWebIdentityToken: Buffer.from(webIdentityToken).toString("base64url").slice(0, 32),
+    };
+  }
+
+  assumeRoleWithSAML(
+    roleArn: string,
+    principalArn: string,
+    samlAssertion: string,
+    durationSeconds: number,
+    region: string,
+  ): AssumedRole {
+    return this.assumeRole(roleArn, `saml-session-${Date.now()}`, durationSeconds, region);
+  }
+
+  getAccessKeyInfo(accessKeyId: string): { account: string } {
+    return { account: this.defaultAccountId };
+  }
 }

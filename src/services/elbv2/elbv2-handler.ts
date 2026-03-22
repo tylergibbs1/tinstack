@@ -1,7 +1,7 @@
 import type { RequestContext } from "../../core/context";
 import { AwsError, xmlErrorResponse } from "../../core/errors";
 import { XmlBuilder, xmlEnvelope, xmlEnvelopeNoResult, xmlResponse, AWS_NAMESPACES } from "../../core/xml";
-import type { Elbv2Service, LoadBalancer, TargetGroup, Listener } from "./elbv2-service";
+import type { Elbv2Service, LoadBalancer, TargetGroup, Listener, Rule, ListenerAction, RuleCondition, TargetDescription, TargetHealthDescription } from "./elbv2-service";
 
 const NS = "http://elasticloadbalancing.amazonaws.com/doc/2015-12-01/";
 
@@ -29,6 +29,22 @@ export class Elbv2QueryHandler {
         case "CreateListener": return this.createListener(params, ctx);
         case "DescribeListeners": return this.describeListeners(params, ctx);
         case "DeleteListener": return this.deleteListener(params, ctx);
+        case "ModifyListener": return this.modifyListener(params, ctx);
+
+        // Targets
+        case "RegisterTargets": return this.registerTargets(params, ctx);
+        case "DeregisterTargets": return this.deregisterTargets(params, ctx);
+        case "DescribeTargetHealth": return this.describeTargetHealth(params, ctx);
+
+        // Target Group modification
+        case "ModifyTargetGroup": return this.modifyTargetGroup(params, ctx);
+
+        // Rules
+        case "CreateRule": return this.createRule(params, ctx);
+        case "DescribeRules": return this.describeRules(params, ctx);
+        case "DeleteRule": return this.deleteRule(params, ctx);
+        case "ModifyRule": return this.modifyRule(params, ctx);
+        case "SetRulePriorities": return this.setRulePriorities(params, ctx);
 
         // Tags
         case "DescribeTags": return this.describeTags(params, ctx);
@@ -184,6 +200,132 @@ export class Elbv2QueryHandler {
     return xmlResponse(xmlEnvelopeNoResult("DeleteListener", ctx.requestId, NS), ctx.requestId);
   }
 
+  // --- Modify Listener ---
+
+  private modifyListener(params: URLSearchParams, ctx: RequestContext): Response {
+    const arn = params.get("ListenerArn")!;
+    const protocol = params.get("Protocol") ?? undefined;
+    const port = params.has("Port") ? parseInt(params.get("Port")!) : undefined;
+    const actions = this.extractDefaultActions(params);
+    const listener = this.service.modifyListener(arn, protocol, port, actions.length > 0 ? actions : undefined);
+    const xml = new XmlBuilder().start("Listeners").raw(this.listenerXml(listener)).end("Listeners");
+    return xmlResponse(xmlEnvelope("ModifyListener", ctx.requestId, xml.build(), NS), ctx.requestId);
+  }
+
+  // --- Targets ---
+
+  private registerTargets(params: URLSearchParams, ctx: RequestContext): Response {
+    const targetGroupArn = params.get("TargetGroupArn")!;
+    const targets = this.extractTargetDescriptions(params);
+    this.service.registerTargets(targetGroupArn, targets);
+    return xmlResponse(xmlEnvelopeNoResult("RegisterTargets", ctx.requestId, NS), ctx.requestId);
+  }
+
+  private deregisterTargets(params: URLSearchParams, ctx: RequestContext): Response {
+    const targetGroupArn = params.get("TargetGroupArn")!;
+    const targets = this.extractTargetDescriptions(params);
+    this.service.deregisterTargets(targetGroupArn, targets);
+    return xmlResponse(xmlEnvelopeNoResult("DeregisterTargets", ctx.requestId, NS), ctx.requestId);
+  }
+
+  private describeTargetHealth(params: URLSearchParams, ctx: RequestContext): Response {
+    const targetGroupArn = params.get("TargetGroupArn")!;
+    const targets = this.extractTargetDescriptions(params);
+    const healthDescriptions = this.service.describeTargetHealth(targetGroupArn, targets.length > 0 ? targets : undefined);
+    const xml = new XmlBuilder().start("TargetHealthDescriptions");
+    for (const thd of healthDescriptions) {
+      xml.start("member");
+      xml.start("Target");
+      xml.elem("Id", thd.target.id);
+      if (thd.target.port !== undefined) xml.elem("Port", thd.target.port);
+      if (thd.target.availabilityZone) xml.elem("AvailabilityZone", thd.target.availabilityZone);
+      xml.end("Target");
+      xml.start("TargetHealth");
+      xml.elem("State", thd.targetHealth.state);
+      if (thd.targetHealth.reason) xml.elem("Reason", thd.targetHealth.reason);
+      if (thd.targetHealth.description) xml.elem("Description", thd.targetHealth.description);
+      xml.end("TargetHealth");
+      xml.end("member");
+    }
+    xml.end("TargetHealthDescriptions");
+    return xmlResponse(xmlEnvelope("DescribeTargetHealth", ctx.requestId, xml.build(), NS), ctx.requestId);
+  }
+
+  // --- ModifyTargetGroup ---
+
+  private modifyTargetGroup(params: URLSearchParams, ctx: RequestContext): Response {
+    const arn = params.get("TargetGroupArn")!;
+    const tg = this.service.modifyTargetGroup(
+      arn,
+      params.get("HealthCheckProtocol") ?? undefined,
+      params.get("HealthCheckPath") ?? undefined,
+      params.get("HealthCheckPort") ?? undefined,
+      params.has("HealthCheckIntervalSeconds") ? parseInt(params.get("HealthCheckIntervalSeconds")!) : undefined,
+      params.has("HealthCheckTimeoutSeconds") ? parseInt(params.get("HealthCheckTimeoutSeconds")!) : undefined,
+      params.has("HealthyThresholdCount") ? parseInt(params.get("HealthyThresholdCount")!) : undefined,
+      params.has("UnhealthyThresholdCount") ? parseInt(params.get("UnhealthyThresholdCount")!) : undefined,
+    );
+    const xml = new XmlBuilder().start("TargetGroups").raw(this.tgXml(tg)).end("TargetGroups");
+    return xmlResponse(xmlEnvelope("ModifyTargetGroup", ctx.requestId, xml.build(), NS), ctx.requestId);
+  }
+
+  // --- Rules ---
+
+  private createRule(params: URLSearchParams, ctx: RequestContext): Response {
+    const listenerArn = params.get("ListenerArn")!;
+    const priority = params.get("Priority")!;
+    const conditions = this.extractConditions(params);
+    const actions = this.extractActions(params);
+    const rule = this.service.createRule(listenerArn, priority, conditions, actions, ctx.region);
+    const xml = new XmlBuilder().start("Rules").raw(this.ruleXml(rule)).end("Rules");
+    return xmlResponse(xmlEnvelope("CreateRule", ctx.requestId, xml.build(), NS), ctx.requestId);
+  }
+
+  private describeRules(params: URLSearchParams, ctx: RequestContext): Response {
+    const listenerArn = params.get("ListenerArn") ?? undefined;
+    const ruleArns = this.extractMembers(params, "RuleArns.member");
+    const rules = this.service.describeRules(listenerArn, ruleArns.length > 0 ? ruleArns : undefined);
+    const xml = new XmlBuilder().start("Rules");
+    for (const r of rules) xml.raw(this.ruleXml(r));
+    xml.end("Rules");
+    return xmlResponse(xmlEnvelope("DescribeRules", ctx.requestId, xml.build(), NS), ctx.requestId);
+  }
+
+  private deleteRule(params: URLSearchParams, ctx: RequestContext): Response {
+    this.service.deleteRule(params.get("RuleArn")!);
+    return xmlResponse(xmlEnvelopeNoResult("DeleteRule", ctx.requestId, NS), ctx.requestId);
+  }
+
+  private modifyRule(params: URLSearchParams, ctx: RequestContext): Response {
+    const arn = params.get("RuleArn")!;
+    const conditions = this.extractConditions(params);
+    const actions = this.extractActions(params);
+    const rule = this.service.modifyRule(
+      arn,
+      conditions.length > 0 ? conditions : undefined,
+      actions.length > 0 ? actions : undefined,
+    );
+    const xml = new XmlBuilder().start("Rules").raw(this.ruleXml(rule)).end("Rules");
+    return xmlResponse(xmlEnvelope("ModifyRule", ctx.requestId, xml.build(), NS), ctx.requestId);
+  }
+
+  private setRulePriorities(params: URLSearchParams, ctx: RequestContext): Response {
+    const priorities: { ruleArn: string; priority: number }[] = [];
+    let i = 1;
+    while (params.has(`RulePriorities.member.${i}.RuleArn`)) {
+      priorities.push({
+        ruleArn: params.get(`RulePriorities.member.${i}.RuleArn`)!,
+        priority: parseInt(params.get(`RulePriorities.member.${i}.Priority`)!),
+      });
+      i++;
+    }
+    const rules = this.service.setRulePriorities(priorities);
+    const xml = new XmlBuilder().start("Rules");
+    for (const r of rules) xml.raw(this.ruleXml(r));
+    xml.end("Rules");
+    return xmlResponse(xmlEnvelope("SetRulePriorities", ctx.requestId, xml.build(), NS), ctx.requestId);
+  }
+
   // --- Tags ---
 
   private describeTags(params: URLSearchParams, ctx: RequestContext): Response {
@@ -323,18 +465,95 @@ export class Elbv2QueryHandler {
     return attrs;
   }
 
-  private extractDefaultActions(params: URLSearchParams): { type: string; targetGroupArn?: string; order?: number }[] {
-    const actions: { type: string; targetGroupArn?: string; order?: number }[] = [];
+  private extractDefaultActions(params: URLSearchParams): ListenerAction[] {
+    return this.extractActionsWithPrefix(params, "DefaultActions");
+  }
+
+  private extractActions(params: URLSearchParams): ListenerAction[] {
+    return this.extractActionsWithPrefix(params, "Actions");
+  }
+
+  private extractActionsWithPrefix(params: URLSearchParams, prefix: string): ListenerAction[] {
+    const actions: ListenerAction[] = [];
     let i = 1;
-    while (params.has(`DefaultActions.member.${i}.Type`)) {
-      const action: any = { type: params.get(`DefaultActions.member.${i}.Type`)! };
-      const tgArn = params.get(`DefaultActions.member.${i}.TargetGroupArn`);
+    while (params.has(`${prefix}.member.${i}.Type`)) {
+      const action: ListenerAction = { type: params.get(`${prefix}.member.${i}.Type`)! };
+      const tgArn = params.get(`${prefix}.member.${i}.TargetGroupArn`);
       if (tgArn) action.targetGroupArn = tgArn;
-      const order = params.get(`DefaultActions.member.${i}.Order`);
+      const order = params.get(`${prefix}.member.${i}.Order`);
       if (order) action.order = parseInt(order);
       actions.push(action);
       i++;
     }
     return actions;
+  }
+
+  private extractTargetDescriptions(params: URLSearchParams): TargetDescription[] {
+    const targets: TargetDescription[] = [];
+    let i = 1;
+    while (params.has(`Targets.member.${i}.Id`)) {
+      const target: TargetDescription = { id: params.get(`Targets.member.${i}.Id`)! };
+      const port = params.get(`Targets.member.${i}.Port`);
+      if (port) target.port = parseInt(port);
+      const az = params.get(`Targets.member.${i}.AvailabilityZone`);
+      if (az) target.availabilityZone = az;
+      targets.push(target);
+      i++;
+    }
+    return targets;
+  }
+
+  private extractConditions(params: URLSearchParams): RuleCondition[] {
+    const conditions: RuleCondition[] = [];
+    let i = 1;
+    while (params.has(`Conditions.member.${i}.Field`)) {
+      const field = params.get(`Conditions.member.${i}.Field`)!;
+      const values: string[] = [];
+      let j = 1;
+      while (params.has(`Conditions.member.${i}.Values.member.${j}`)) {
+        values.push(params.get(`Conditions.member.${i}.Values.member.${j}`)!);
+        j++;
+      }
+      // Also check PathPatternConfig and HostHeaderConfig
+      if (values.length === 0) {
+        let j = 1;
+        const configKey = field === "path-pattern" ? "PathPatternConfig" : field === "host-header" ? "HostHeaderConfig" : "HttpRequestMethodConfig";
+        while (params.has(`Conditions.member.${i}.${configKey}.Values.member.${j}`)) {
+          values.push(params.get(`Conditions.member.${i}.${configKey}.Values.member.${j}`)!);
+          j++;
+        }
+      }
+      conditions.push({ field, values });
+      i++;
+    }
+    return conditions;
+  }
+
+  private ruleXml(rule: Rule): string {
+    const xml = new XmlBuilder()
+      .start("member")
+      .elem("RuleArn", rule.ruleArn)
+      .elem("Priority", rule.priority)
+      .elem("IsDefault", rule.isDefault);
+    xml.start("Conditions");
+    for (const c of rule.conditions) {
+      xml.start("member");
+      xml.elem("Field", c.field);
+      xml.start("Values");
+      for (const v of c.values) xml.elem("member", v);
+      xml.end("Values");
+      xml.end("member");
+    }
+    xml.end("Conditions");
+    xml.start("Actions");
+    for (const a of rule.actions) {
+      xml.start("member").elem("Type", a.type);
+      if (a.targetGroupArn) xml.elem("TargetGroupArn", a.targetGroupArn);
+      if (a.order !== undefined) xml.elem("Order", a.order);
+      xml.end("member");
+    }
+    xml.end("Actions");
+    xml.end("member");
+    return xml.build();
   }
 }

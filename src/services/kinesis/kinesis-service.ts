@@ -11,6 +11,8 @@ export interface KinesisStream {
   createdTimestamp: number;
   shards: KinesisShard[];
   tags: Record<string, string>;
+  encryptionType: string; // "NONE" | "KMS"
+  keyId?: string;
 }
 
 export interface KinesisShard {
@@ -28,8 +30,17 @@ export interface KinesisRecord {
   timestamp: number;
 }
 
+export interface StreamConsumer {
+  consumerName: string;
+  consumerArn: string;
+  streamArn: string;
+  consumerStatus: string;
+  consumerCreationTimestamp: number;
+}
+
 export class KinesisService {
   private streams: StorageBackend<string, KinesisStream>;
+  private consumers: Map<string, StreamConsumer> = new Map(); // consumerArn -> consumer
   private sequenceCounter = 0;
   private iterators: Map<string, { shardId: string; streamKey: string; position: number }> = new Map();
 
@@ -65,6 +76,7 @@ export class KinesisService {
       createdTimestamp: Date.now() / 1000,
       shards,
       tags: {},
+      encryptionType: "NONE",
     });
   }
 
@@ -170,7 +182,7 @@ export class KinesisService {
       RetentionPeriodHours: stream.retentionPeriodHours,
       StreamCreationTimestamp: stream.createdTimestamp,
       OpenShardCount: stream.shardCount,
-      ConsumerCount: 0,
+      ConsumerCount: this.listStreamConsumers(stream.streamArn).length,
       StreamModeDetails: { StreamMode: "PROVISIONED" },
     };
   }
@@ -186,6 +198,188 @@ export class KinesisService {
   addTagsToStream(streamName: string, tags: Record<string, string>, region: string): void {
     const stream = this.describeStream(streamName, region);
     Object.assign(stream.tags, tags);
+  }
+
+  listShards(streamName: string, region: string): KinesisShard[] {
+    const stream = this.describeStream(streamName, region);
+    return stream.shards;
+  }
+
+  updateShardCount(streamName: string, targetShardCount: number, region: string): { streamName: string; currentShardCount: number; targetShardCount: number } {
+    const key = this.regionKey(region, streamName);
+    const stream = this.streams.get(key);
+    if (!stream) throw new AwsError("ResourceNotFoundException", `Stream ${streamName} not found.`, 400);
+
+    const currentCount = stream.shardCount;
+    const maxHashKey = "340282366920938463463374607431768211455";
+
+    const newShards: KinesisShard[] = [];
+    for (let i = 0; i < targetShardCount; i++) {
+      newShards.push({
+        shardId: `shardId-${String(i).padStart(12, "0")}`,
+        hashKeyRange: { startingHashKey: "0", endingHashKey: maxHashKey },
+        sequenceNumberRange: { startingSequenceNumber: "0" },
+        records: [],
+      });
+    }
+
+    stream.shards = newShards;
+    stream.shardCount = targetShardCount;
+
+    return { streamName, currentShardCount: currentCount, targetShardCount };
+  }
+
+  registerStreamConsumer(consumerName: string, streamArn: string, region: string): StreamConsumer {
+    // Check for duplicate
+    for (const c of this.consumers.values()) {
+      if (c.streamArn === streamArn && c.consumerName === consumerName) {
+        throw new AwsError("ResourceInUseException", `Consumer ${consumerName} already exists.`, 400);
+      }
+    }
+
+    const consumerArn = `${streamArn}/consumer/${consumerName}:${Date.now()}`;
+    const consumer: StreamConsumer = {
+      consumerName,
+      consumerArn,
+      streamArn,
+      consumerStatus: "ACTIVE",
+      consumerCreationTimestamp: Date.now() / 1000,
+    };
+    this.consumers.set(consumerArn, consumer);
+    return consumer;
+  }
+
+  describeStreamConsumer(consumerArn?: string, consumerName?: string, streamArn?: string): StreamConsumer {
+    if (consumerArn) {
+      const consumer = this.consumers.get(consumerArn);
+      if (!consumer) throw new AwsError("ResourceNotFoundException", "Consumer not found.", 400);
+      return consumer;
+    }
+    if (consumerName && streamArn) {
+      for (const c of this.consumers.values()) {
+        if (c.streamArn === streamArn && c.consumerName === consumerName) return c;
+      }
+    }
+    throw new AwsError("ResourceNotFoundException", "Consumer not found.", 400);
+  }
+
+  listStreamConsumers(streamArn: string): StreamConsumer[] {
+    return [...this.consumers.values()].filter((c) => c.streamArn === streamArn);
+  }
+
+  deregisterStreamConsumer(consumerArn?: string, consumerName?: string, streamArn?: string): void {
+    if (consumerArn) {
+      if (!this.consumers.has(consumerArn)) throw new AwsError("ResourceNotFoundException", "Consumer not found.", 400);
+      this.consumers.delete(consumerArn);
+      return;
+    }
+    if (consumerName && streamArn) {
+      for (const [arn, c] of this.consumers) {
+        if (c.streamArn === streamArn && c.consumerName === consumerName) {
+          this.consumers.delete(arn);
+          return;
+        }
+      }
+    }
+    throw new AwsError("ResourceNotFoundException", "Consumer not found.", 400);
+  }
+
+  startStreamEncryption(streamName: string, encryptionType: string, keyId: string, region: string): void {
+    const stream = this.describeStream(streamName, region);
+    stream.encryptionType = encryptionType;
+    stream.keyId = keyId;
+  }
+
+  stopStreamEncryption(streamName: string, encryptionType: string, keyId: string, region: string): void {
+    const stream = this.describeStream(streamName, region);
+    stream.encryptionType = "NONE";
+    stream.keyId = undefined;
+  }
+
+  mergeShards(streamName: string, shardToMerge: string, adjacentShardToMerge: string, region: string): void {
+    const key = this.regionKey(region, streamName);
+    const stream = this.streams.get(key);
+    if (!stream) throw new AwsError("ResourceNotFoundException", `Stream ${streamName} not found.`, 400);
+
+    const shard1Idx = stream.shards.findIndex((s) => s.shardId === shardToMerge);
+    const shard2Idx = stream.shards.findIndex((s) => s.shardId === adjacentShardToMerge);
+    if (shard1Idx < 0) throw new AwsError("ResourceNotFoundException", `Shard ${shardToMerge} not found.`, 400);
+    if (shard2Idx < 0) throw new AwsError("ResourceNotFoundException", `Shard ${adjacentShardToMerge} not found.`, 400);
+
+    const shard1 = stream.shards[shard1Idx];
+    const shard2 = stream.shards[shard2Idx];
+
+    // Create merged shard
+    const mergedShard: KinesisShard = {
+      shardId: `shardId-${String(stream.shards.length).padStart(12, "0")}`,
+      parentShardId: shard1.shardId,
+      hashKeyRange: {
+        startingHashKey: shard1.hashKeyRange.startingHashKey < shard2.hashKeyRange.startingHashKey
+          ? shard1.hashKeyRange.startingHashKey : shard2.hashKeyRange.startingHashKey,
+        endingHashKey: shard1.hashKeyRange.endingHashKey > shard2.hashKeyRange.endingHashKey
+          ? shard1.hashKeyRange.endingHashKey : shard2.hashKeyRange.endingHashKey,
+      },
+      sequenceNumberRange: { startingSequenceNumber: String(this.sequenceCounter + 1) },
+      records: [...shard1.records, ...shard2.records],
+    };
+
+    // Remove old shards, add merged
+    stream.shards = stream.shards.filter((s) => s.shardId !== shardToMerge && s.shardId !== adjacentShardToMerge);
+    stream.shards.push(mergedShard);
+    stream.shardCount = stream.shards.length;
+  }
+
+  splitShard(streamName: string, shardToSplit: string, newStartingHashKey: string, region: string): void {
+    const key = this.regionKey(region, streamName);
+    const stream = this.streams.get(key);
+    if (!stream) throw new AwsError("ResourceNotFoundException", `Stream ${streamName} not found.`, 400);
+
+    const shardIdx = stream.shards.findIndex((s) => s.shardId === shardToSplit);
+    if (shardIdx < 0) throw new AwsError("ResourceNotFoundException", `Shard ${shardToSplit} not found.`, 400);
+
+    const shard = stream.shards[shardIdx];
+    const nextId = stream.shards.length;
+
+    const child1: KinesisShard = {
+      shardId: `shardId-${String(nextId).padStart(12, "0")}`,
+      parentShardId: shard.shardId,
+      hashKeyRange: {
+        startingHashKey: shard.hashKeyRange.startingHashKey,
+        endingHashKey: String(BigInt(newStartingHashKey) - 1n),
+      },
+      sequenceNumberRange: { startingSequenceNumber: String(this.sequenceCounter + 1) },
+      records: [],
+    };
+
+    const child2: KinesisShard = {
+      shardId: `shardId-${String(nextId + 1).padStart(12, "0")}`,
+      parentShardId: shard.shardId,
+      hashKeyRange: {
+        startingHashKey: newStartingHashKey,
+        endingHashKey: shard.hashKeyRange.endingHashKey,
+      },
+      sequenceNumberRange: { startingSequenceNumber: String(this.sequenceCounter + 1) },
+      records: [],
+    };
+
+    stream.shards = stream.shards.filter((s) => s.shardId !== shardToSplit);
+    stream.shards.push(child1, child2);
+    stream.shardCount = stream.shards.length;
+  }
+
+  describeLimits(region: string): { shardLimit: number; openShardCount: number; onDemandStreamCount: number; onDemandStreamCountLimit: number } {
+    let openShardCount = 0;
+    for (const stream of this.streams.values()) {
+      if (this.streams.has(this.regionKey(region, stream.streamName))) {
+        openShardCount += stream.shardCount;
+      }
+    }
+    return {
+      shardLimit: 500,
+      openShardCount,
+      onDemandStreamCount: 0,
+      onDemandStreamCountLimit: 50,
+    };
   }
 
   private simpleHash(s: string): number {

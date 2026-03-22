@@ -34,6 +34,18 @@ export class SecretsManagerHandler {
           return this.getRandomPassword(body, ctx);
         case "GetResourcePolicy":
           return this.getResourcePolicy(body, ctx);
+        case "PutResourcePolicy":
+          return this.putResourcePolicy(body, ctx);
+        case "DeleteResourcePolicy":
+          return this.deleteResourcePolicy(body, ctx);
+        case "UpdateSecretVersionStage":
+          return this.updateSecretVersionStage(body, ctx);
+        case "RotateSecret":
+          return this.rotateSecret(body, ctx);
+        case "CancelRotateSecret":
+          return this.cancelRotateSecret(body, ctx);
+        case "BatchGetSecretValue":
+          return this.batchGetSecretValue(body, ctx);
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }
@@ -182,8 +194,25 @@ export class SecretsManagerHandler {
   }
 
   private getResourcePolicy(body: any, ctx: RequestContext): Response {
-    const secret = this.service.describeSecret(body.SecretId, ctx.region);
-    return this.json({ ARN: secret.arn, Name: secret.name, ResourcePolicy: null }, ctx);
+    const result = this.service.getResourcePolicy(body.SecretId, ctx.region);
+    return this.json({ ARN: result.arn, Name: result.name, ResourcePolicy: result.resourcePolicy ?? null }, ctx);
+  }
+
+  private putResourcePolicy(body: any, ctx: RequestContext): Response {
+    const result = this.service.putResourcePolicy(body.SecretId, body.ResourcePolicy, ctx.region);
+    return this.json({ ARN: result.arn, Name: result.name }, ctx);
+  }
+
+  private deleteResourcePolicy(body: any, ctx: RequestContext): Response {
+    const result = this.service.deleteResourcePolicy(body.SecretId, ctx.region);
+    return this.json({ ARN: result.arn, Name: result.name }, ctx);
+  }
+
+  private updateSecretVersionStage(body: any, ctx: RequestContext): Response {
+    const result = this.service.updateSecretVersionStage(
+      body.SecretId, body.VersionStage, body.MoveToVersionId, body.RemoveFromVersionId, ctx.region,
+    );
+    return this.json({ ARN: result.arn, Name: result.name }, ctx);
   }
 
   private getRandomPassword(body: any, ctx: RequestContext): Response {
@@ -197,5 +226,42 @@ export class SecretsManagerHandler {
       body.IncludeSpace ?? false,
     );
     return this.json({ RandomPassword: password }, ctx);
+  }
+
+  private rotateSecret(body: any, ctx: RequestContext): Response {
+    const { secret, versionId } = this.service.rotateSecret(
+      body.SecretId, body.RotationLambdaARN, body.RotationRules, ctx.region,
+    );
+    return this.json({
+      ARN: secret.arn,
+      Name: secret.name,
+      VersionId: versionId,
+    }, ctx);
+  }
+
+  private cancelRotateSecret(body: any, ctx: RequestContext): Response {
+    const secret = this.service.cancelRotateSecret(body.SecretId, ctx.region);
+    return this.json({
+      ARN: secret.arn,
+      Name: secret.name,
+    }, ctx);
+  }
+
+  private batchGetSecretValue(body: any, ctx: RequestContext): Response {
+    const { secretValues, errors } = this.service.batchGetSecretValue(
+      body.SecretIdList, body.Filters, ctx.region,
+    );
+    return this.json({
+      SecretValues: secretValues.map(({ secret, version }) => ({
+        ARN: secret.arn,
+        Name: secret.name,
+        VersionId: version.versionId,
+        SecretString: version.secretString,
+        SecretBinary: version.secretBinary,
+        VersionStages: version.versionStages,
+        CreatedDate: version.createdDate,
+      })),
+      Errors: errors.length > 0 ? errors : undefined,
+    }, ctx);
   }
 }

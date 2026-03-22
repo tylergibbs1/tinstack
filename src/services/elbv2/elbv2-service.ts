@@ -40,8 +40,35 @@ export interface Listener {
   loadBalancerArn: string;
   protocol: string;
   port: number;
-  defaultActions: { type: string; targetGroupArn?: string; order?: number }[];
+  defaultActions: ListenerAction[];
   tags: Record<string, string>;
+}
+
+export type ListenerAction = { type: string; targetGroupArn?: string; order?: number };
+
+export interface TargetDescription {
+  id: string;
+  port?: number;
+  availabilityZone?: string;
+}
+
+export interface TargetHealthDescription {
+  target: TargetDescription;
+  targetHealth: { state: string; reason?: string; description?: string };
+}
+
+export interface RuleCondition {
+  field: string;
+  values: string[];
+}
+
+export interface Rule {
+  ruleArn: string;
+  listenerArn: string;
+  priority: string; // "default" or numeric string
+  conditions: RuleCondition[];
+  actions: ListenerAction[];
+  isDefault: boolean;
 }
 
 export class Elbv2Service {
@@ -49,12 +76,16 @@ export class Elbv2Service {
   private targetGroups: StorageBackend<string, TargetGroup>;
   private listeners: StorageBackend<string, Listener>;
   private tags: StorageBackend<string, Record<string, string>>; // arn -> tags
+  private targets: StorageBackend<string, TargetDescription[]>; // targetGroupArn -> targets
+  private rules: StorageBackend<string, Rule>; // ruleArn -> rule
 
   constructor(private accountId: string) {
     this.loadBalancers = new InMemoryStorage();
     this.targetGroups = new InMemoryStorage();
     this.listeners = new InMemoryStorage();
     this.tags = new InMemoryStorage();
+    this.targets = new InMemoryStorage();
+    this.rules = new InMemoryStorage();
   }
 
   createLoadBalancer(
@@ -200,6 +231,7 @@ export class Elbv2Service {
   deleteTargetGroup(arn: string): void {
     if (!this.targetGroups.has(arn)) throw new AwsError("TargetGroupNotFound", `Target group '${arn}' not found.`, 400);
     this.targetGroups.delete(arn);
+    this.targets.delete(arn);
     this.tags.delete(arn);
   }
 
@@ -259,8 +291,166 @@ export class Elbv2Service {
 
   deleteListener(arn: string): void {
     if (!this.listeners.has(arn)) throw new AwsError("ListenerNotFound", `Listener '${arn}' not found.`, 400);
+    // Delete associated rules
+    for (const rule of this.rules.values()) {
+      if (rule.listenerArn === arn) {
+        this.rules.delete(rule.ruleArn);
+      }
+    }
     this.listeners.delete(arn);
     this.tags.delete(arn);
+  }
+
+  modifyListener(
+    arn: string,
+    protocol: string | undefined,
+    port: number | undefined,
+    defaultActions: ListenerAction[] | undefined,
+  ): Listener {
+    const listener = this.listeners.get(arn);
+    if (!listener) throw new AwsError("ListenerNotFound", `Listener '${arn}' not found.`, 400);
+    if (protocol !== undefined) listener.protocol = protocol;
+    if (port !== undefined) listener.port = port;
+    if (defaultActions !== undefined) listener.defaultActions = defaultActions;
+    return listener;
+  }
+
+  // --- Target registration ---
+
+  registerTargets(targetGroupArn: string, newTargets: TargetDescription[]): void {
+    if (!this.targetGroups.has(targetGroupArn)) {
+      throw new AwsError("TargetGroupNotFound", `Target group '${targetGroupArn}' not found.`, 400);
+    }
+    const existing = this.targets.get(targetGroupArn) ?? [];
+    for (const t of newTargets) {
+      const idx = existing.findIndex((e) => e.id === t.id && (e.port ?? null) === (t.port ?? null));
+      if (idx === -1) existing.push(t);
+    }
+    this.targets.set(targetGroupArn, existing);
+  }
+
+  deregisterTargets(targetGroupArn: string, toRemove: TargetDescription[]): void {
+    if (!this.targetGroups.has(targetGroupArn)) {
+      throw new AwsError("TargetGroupNotFound", `Target group '${targetGroupArn}' not found.`, 400);
+    }
+    const existing = this.targets.get(targetGroupArn) ?? [];
+    const filtered = existing.filter(
+      (e) => !toRemove.some((r) => r.id === e.id && (r.port === undefined || r.port === e.port)),
+    );
+    this.targets.set(targetGroupArn, filtered);
+  }
+
+  describeTargetHealth(targetGroupArn: string, requestedTargets: TargetDescription[] | undefined): TargetHealthDescription[] {
+    if (!this.targetGroups.has(targetGroupArn)) {
+      throw new AwsError("TargetGroupNotFound", `Target group '${targetGroupArn}' not found.`, 400);
+    }
+    const registered = this.targets.get(targetGroupArn) ?? [];
+    const toDescribe = requestedTargets && requestedTargets.length > 0 ? requestedTargets : registered;
+    return toDescribe.map((t) => ({
+      target: { id: t.id, port: t.port, availabilityZone: t.availabilityZone },
+      targetHealth: { state: "healthy" },
+    }));
+  }
+
+  // --- Target group modification ---
+
+  modifyTargetGroup(
+    arn: string,
+    healthCheckProtocol: string | undefined,
+    healthCheckPath: string | undefined,
+    healthCheckPort: string | undefined,
+    healthCheckIntervalSeconds: number | undefined,
+    healthCheckTimeoutSeconds: number | undefined,
+    healthyThresholdCount: number | undefined,
+    unhealthyThresholdCount: number | undefined,
+  ): TargetGroup {
+    const tg = this.targetGroups.get(arn);
+    if (!tg) throw new AwsError("TargetGroupNotFound", `Target group '${arn}' not found.`, 400);
+    if (healthCheckProtocol !== undefined) tg.healthCheckProtocol = healthCheckProtocol;
+    if (healthCheckPath !== undefined) tg.healthCheckPath = healthCheckPath;
+    if (healthCheckPort !== undefined) tg.healthCheckPort = healthCheckPort;
+    if (healthCheckIntervalSeconds !== undefined) tg.healthCheckIntervalSeconds = healthCheckIntervalSeconds;
+    if (healthCheckTimeoutSeconds !== undefined) tg.healthCheckTimeoutSeconds = healthCheckTimeoutSeconds;
+    if (healthyThresholdCount !== undefined) tg.healthyThresholdCount = healthyThresholdCount;
+    if (unhealthyThresholdCount !== undefined) tg.unhealthyThresholdCount = unhealthyThresholdCount;
+    return tg;
+  }
+
+  // --- Rules ---
+
+  createRule(
+    listenerArn: string,
+    priority: string,
+    conditions: RuleCondition[],
+    actions: ListenerAction[],
+    region: string,
+  ): Rule {
+    if (!this.listeners.has(listenerArn)) {
+      throw new AwsError("ListenerNotFound", `Listener '${listenerArn}' not found.`, 400);
+    }
+    // Check for duplicate priority
+    for (const r of this.rules.values()) {
+      if (r.listenerArn === listenerArn && r.priority === priority) {
+        throw new AwsError("PriorityInUse", `Priority '${priority}' is already in use.`, 400);
+      }
+    }
+    const ruleId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    const ruleArn = buildArn("elasticloadbalancing", region, this.accountId, "listener-rule/", `app/${ruleId}`);
+    const rule: Rule = {
+      ruleArn,
+      listenerArn,
+      priority,
+      conditions,
+      actions,
+      isDefault: false,
+    };
+    this.rules.set(ruleArn, rule);
+    return rule;
+  }
+
+  describeRules(listenerArn: string | undefined, ruleArns: string[] | undefined): Rule[] {
+    if (ruleArns && ruleArns.length > 0) {
+      return ruleArns.map((a) => {
+        const r = this.rules.get(a);
+        if (!r) throw new AwsError("RuleNotFound", `Rule '${a}' not found.`, 400);
+        return r;
+      });
+    }
+    if (listenerArn) {
+      const rules = this.rules.values().filter((r) => r.listenerArn === listenerArn);
+      return rules.sort((a, b) => {
+        if (a.isDefault) return 1;
+        if (b.isDefault) return -1;
+        return parseInt(a.priority) - parseInt(b.priority);
+      });
+    }
+    return this.rules.values();
+  }
+
+  deleteRule(arn: string): void {
+    const rule = this.rules.get(arn);
+    if (!rule) throw new AwsError("RuleNotFound", `Rule '${arn}' not found.`, 400);
+    if (rule.isDefault) throw new AwsError("OperationNotPermitted", "Default rules cannot be deleted.", 400);
+    this.rules.delete(arn);
+  }
+
+  modifyRule(arn: string, conditions: RuleCondition[] | undefined, actions: ListenerAction[] | undefined): Rule {
+    const rule = this.rules.get(arn);
+    if (!rule) throw new AwsError("RuleNotFound", `Rule '${arn}' not found.`, 400);
+    if (conditions !== undefined) rule.conditions = conditions;
+    if (actions !== undefined) rule.actions = actions;
+    return rule;
+  }
+
+  setRulePriorities(rulePriorities: { ruleArn: string; priority: number }[]): Rule[] {
+    const updated: Rule[] = [];
+    for (const rp of rulePriorities) {
+      const rule = this.rules.get(rp.ruleArn);
+      if (!rule) throw new AwsError("RuleNotFound", `Rule '${rp.ruleArn}' not found.`, 400);
+      rule.priority = String(rp.priority);
+      updated.push(rule);
+    }
+    return updated;
   }
 
   describeTags(resourceArns: string[]): { resourceArn: string; tags: { key: string; value: string }[] }[] {

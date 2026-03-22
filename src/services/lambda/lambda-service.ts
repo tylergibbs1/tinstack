@@ -37,6 +37,44 @@ export interface InvocationResult {
   logResult?: string;
 }
 
+export interface LambdaVersion {
+  functionName: string;
+  version: string;
+  config: Omit<LambdaFunction, "codeZip" | "codePath">;
+}
+
+export interface LambdaAlias {
+  name: string;
+  functionName: string;
+  functionVersion: string;
+  description: string;
+  routingConfig?: { AdditionalVersionWeights: Record<string, number> };
+  aliasArn: string;
+  revisionId: string;
+}
+
+export interface LayerVersion {
+  layerName: string;
+  version: number;
+  layerVersionArn: string;
+  description: string;
+  compatibleRuntimes: string[];
+  createdDate: string;
+  content: {
+    codeSha256: string;
+    codeSize: number;
+  };
+}
+
+export interface PolicyStatement {
+  sid: string;
+  effect: string;
+  principal: any;
+  action: string;
+  resource: string;
+  condition?: any;
+}
+
 export interface EventSourceMapping {
   uuid: string;
   functionArn: string;
@@ -50,6 +88,11 @@ export interface EventSourceMapping {
 export class LambdaService {
   private functions: StorageBackend<string, LambdaFunction>;
   private eventSourceMappings: StorageBackend<string, EventSourceMapping>;
+  private versions: StorageBackend<string, LambdaVersion[]>;
+  private versionCounters: StorageBackend<string, number>;
+  private aliases: StorageBackend<string, LambdaAlias>;
+  private layers: StorageBackend<string, LayerVersion[]>;
+  private policies: StorageBackend<string, PolicyStatement[]>;
   private storagePath: string;
 
   constructor(
@@ -58,6 +101,11 @@ export class LambdaService {
   ) {
     this.functions = new InMemoryStorage();
     this.eventSourceMappings = new InMemoryStorage();
+    this.versions = new InMemoryStorage();
+    this.versionCounters = new InMemoryStorage();
+    this.aliases = new InMemoryStorage();
+    this.layers = new InMemoryStorage();
+    this.policies = new InMemoryStorage();
     this.storagePath = resolve(join(storagePath, "lambda"));
   }
 
@@ -247,6 +295,199 @@ export class LambdaService {
       if (fn.functionArn === arn) return fn.tags;
     }
     return {};
+  }
+
+  // --- Versions ---
+
+  publishVersion(functionName: string, description: string | undefined, region: string): LambdaVersion {
+    const fn = this.findFunction(functionName, region);
+    const key = this.regionKey(region, functionName);
+    const counter = (this.versionCounters.get(key) ?? 0) + 1;
+    this.versionCounters.set(key, counter);
+
+    const versionNum = String(counter);
+    const { codeZip, codePath, ...config } = fn;
+    const ver: LambdaVersion = {
+      functionName: fn.functionName,
+      version: versionNum,
+      config: { ...config, version: versionNum, description: description ?? fn.description },
+    };
+
+    const versions = this.versions.get(key) ?? [];
+    versions.push(ver);
+    this.versions.set(key, versions);
+    return ver;
+  }
+
+  listVersionsByFunction(functionName: string, region: string): LambdaVersion[] {
+    const fn = this.findFunction(functionName, region);
+    const key = this.regionKey(region, functionName);
+    const { codeZip, codePath, ...config } = fn;
+    const latest: LambdaVersion = { functionName: fn.functionName, version: "$LATEST", config };
+    const stored = this.versions.get(key) ?? [];
+    return [latest, ...stored];
+  }
+
+  // --- Aliases ---
+
+  createAlias(functionName: string, aliasName: string, functionVersion: string, description: string, routingConfig: any, region: string): LambdaAlias {
+    this.findFunction(functionName, region);
+    const key = `${this.regionKey(region, functionName)}#alias#${aliasName}`;
+    if (this.aliases.has(key)) {
+      throw new AwsError("ResourceConflictException", `Alias already exists: ${aliasName}`, 409);
+    }
+    const alias: LambdaAlias = {
+      name: aliasName,
+      functionName,
+      functionVersion,
+      description: description ?? "",
+      routingConfig,
+      aliasArn: buildArn("lambda", region, this.accountId, "function:", `${functionName}:${aliasName}`),
+      revisionId: crypto.randomUUID(),
+    };
+    this.aliases.set(key, alias);
+    return alias;
+  }
+
+  getAlias(functionName: string, aliasName: string, region: string): LambdaAlias {
+    this.findFunction(functionName, region);
+    const key = `${this.regionKey(region, functionName)}#alias#${aliasName}`;
+    const alias = this.aliases.get(key);
+    if (!alias) throw new AwsError("ResourceNotFoundException", `Alias not found: ${aliasName}`, 404);
+    return alias;
+  }
+
+  listAliases(functionName: string, region: string): LambdaAlias[] {
+    this.findFunction(functionName, region);
+    const prefix = `${this.regionKey(region, functionName)}#alias#`;
+    return this.aliases.keys()
+      .filter((k) => k.startsWith(prefix))
+      .map((k) => this.aliases.get(k)!);
+  }
+
+  updateAlias(functionName: string, aliasName: string, functionVersion: string | undefined, description: string | undefined, routingConfig: any, region: string): LambdaAlias {
+    const alias = this.getAlias(functionName, aliasName, region);
+    if (functionVersion !== undefined) alias.functionVersion = functionVersion;
+    if (description !== undefined) alias.description = description;
+    if (routingConfig !== undefined) alias.routingConfig = routingConfig;
+    alias.revisionId = crypto.randomUUID();
+    return alias;
+  }
+
+  deleteAlias(functionName: string, aliasName: string, region: string): void {
+    this.getAlias(functionName, aliasName, region); // validate exists
+    const key = `${this.regionKey(region, functionName)}#alias#${aliasName}`;
+    this.aliases.delete(key);
+  }
+
+  // --- Layers ---
+
+  publishLayerVersion(layerName: string, description: string, content: any, compatibleRuntimes: string[], region: string): LayerVersion {
+    const key = `${region}#layer#${layerName}`;
+    const versions = this.layers.get(key) ?? [];
+    const version = versions.length + 1;
+    const layerVersionArn = buildArn("lambda", region, this.accountId, "layer:", `${layerName}:${version}`);
+
+    const zipData = content?.ZipFile ? Buffer.from(content.ZipFile, "base64") : Buffer.alloc(0);
+    const hasher = new Bun.CryptoHasher("sha256");
+    hasher.update(zipData);
+
+    const lv: LayerVersion = {
+      layerName,
+      version,
+      layerVersionArn,
+      description: description ?? "",
+      compatibleRuntimes: compatibleRuntimes ?? [],
+      createdDate: new Date().toISOString(),
+      content: {
+        codeSha256: hasher.digest("base64") as string,
+        codeSize: zipData.length,
+      },
+    };
+    versions.push(lv);
+    this.layers.set(key, versions);
+    return lv;
+  }
+
+  getLayerVersion(layerName: string, versionNumber: number, region: string): LayerVersion {
+    const key = `${region}#layer#${layerName}`;
+    const versions = this.layers.get(key);
+    const lv = versions?.find((v) => v.version === versionNumber);
+    if (!lv) throw new AwsError("ResourceNotFoundException", `Layer version not found: ${layerName}:${versionNumber}`, 404);
+    return lv;
+  }
+
+  listLayers(region: string): LayerVersion[] {
+    const result: LayerVersion[] = [];
+    for (const k of this.layers.keys()) {
+      if (!k.startsWith(`${region}#layer#`)) continue;
+      const versions = this.layers.get(k)!;
+      if (versions.length > 0) result.push(versions[versions.length - 1]);
+    }
+    return result;
+  }
+
+  listLayerVersions(layerName: string, region: string): LayerVersion[] {
+    const key = `${region}#layer#${layerName}`;
+    return this.layers.get(key) ?? [];
+  }
+
+  deleteLayerVersion(layerName: string, versionNumber: number, region: string): void {
+    const key = `${region}#layer#${layerName}`;
+    const versions = this.layers.get(key);
+    if (!versions) throw new AwsError("ResourceNotFoundException", `Layer not found: ${layerName}`, 404);
+    const idx = versions.findIndex((v) => v.version === versionNumber);
+    if (idx === -1) throw new AwsError("ResourceNotFoundException", `Layer version not found: ${layerName}:${versionNumber}`, 404);
+    versions.splice(idx, 1);
+  }
+
+  // --- Permissions (resource-based policy) ---
+
+  addPermission(functionName: string, statement: PolicyStatement, region: string): PolicyStatement {
+    this.findFunction(functionName, region);
+    const key = this.regionKey(region, functionName) + "#policy";
+    const statements = this.policies.get(key) ?? [];
+    if (statements.some((s) => s.sid === statement.sid)) {
+      throw new AwsError("ResourceConflictException", `Policy statement already exists: ${statement.sid}`, 409);
+    }
+    statements.push(statement);
+    this.policies.set(key, statements);
+    return statement;
+  }
+
+  getPolicy(functionName: string, region: string): { policy: string; revisionId: string } {
+    this.findFunction(functionName, region);
+    const key = this.regionKey(region, functionName) + "#policy";
+    const statements = this.policies.get(key);
+    if (!statements || statements.length === 0) {
+      throw new AwsError("ResourceNotFoundException", `No policy found for function: ${functionName}`, 404);
+    }
+    const policy = {
+      Version: "2012-10-17",
+      Id: "default",
+      Statement: statements.map((s) => ({
+        Sid: s.sid,
+        Effect: s.effect,
+        Principal: s.principal,
+        Action: s.action,
+        Resource: s.resource,
+        ...(s.condition ? { Condition: s.condition } : {}),
+      })),
+    };
+    return { policy: JSON.stringify(policy), revisionId: crypto.randomUUID() };
+  }
+
+  removePermission(functionName: string, sid: string, region: string): void {
+    this.findFunction(functionName, region);
+    const key = this.regionKey(region, functionName) + "#policy";
+    const statements = this.policies.get(key);
+    if (!statements) throw new AwsError("ResourceNotFoundException", `No policy found for function: ${functionName}`, 404);
+    const idx = statements.findIndex((s) => s.sid === sid);
+    if (idx === -1) throw new AwsError("ResourceNotFoundException", `Statement not found: ${sid}`, 404);
+    statements.splice(idx, 1);
+    if (statements.length === 0) {
+      this.policies.delete(key);
+    }
   }
 
   // --- Invocation methods ---

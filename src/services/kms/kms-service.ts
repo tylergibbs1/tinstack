@@ -13,15 +13,29 @@ export interface KmsKey {
   enabled: boolean;
   aliases: string[];
   tags: Record<string, string>;
+  rotationEnabled: boolean;
+}
+
+export interface KmsGrant {
+  grantId: string;
+  grantToken: string;
+  keyId: string;
+  granteePrincipal: string;
+  retiringPrincipal?: string;
+  operations: string[];
+  creationDate: number;
+  name?: string;
 }
 
 export class KmsService {
   private keys: StorageBackend<string, KmsKey>;
   private aliases: StorageBackend<string, string>; // alias -> keyId
+  private grants: StorageBackend<string, KmsGrant[]>;
 
   constructor(private accountId: string) {
     this.keys = new InMemoryStorage();
     this.aliases = new InMemoryStorage();
+    this.grants = new InMemoryStorage();
   }
 
   private regionKey(region: string, keyId: string): string {
@@ -41,6 +55,7 @@ export class KmsService {
       enabled: true,
       aliases: [],
       tags,
+      rotationEnabled: false,
     };
     this.keys.set(this.regionKey(region, keyId), key);
     return key;
@@ -140,6 +155,99 @@ export class KmsService {
     const plaintext = Buffer.from(plaintextBytes).toString("base64");
     const encrypted = this.encrypt(keyId, plaintext, region);
     return { ciphertextBlob: encrypted.ciphertextBlob, plaintext, keyId: key.arn };
+  }
+
+  tagResource(keyId: string, tags: { TagKey: string; TagValue: string }[], region: string): void {
+    const key = this.findKey(keyId, region);
+    for (const t of tags) key.tags[t.TagKey] = t.TagValue;
+  }
+
+  untagResource(keyId: string, tagKeys: string[], region: string): void {
+    const key = this.findKey(keyId, region);
+    for (const k of tagKeys) delete key.tags[k];
+  }
+
+  enableKeyRotation(keyId: string, region: string): void {
+    const key = this.findKey(keyId, region);
+    key.rotationEnabled = true;
+  }
+
+  disableKeyRotation(keyId: string, region: string): void {
+    const key = this.findKey(keyId, region);
+    key.rotationEnabled = false;
+  }
+
+  getKeyRotationStatus(keyId: string, region: string): boolean {
+    const key = this.findKey(keyId, region);
+    return key.rotationEnabled;
+  }
+
+  generateRandom(numberOfBytes: number): string {
+    const bytes = new Uint8Array(numberOfBytes || 32);
+    crypto.getRandomValues(bytes);
+    return Buffer.from(bytes).toString("base64");
+  }
+
+  sign(keyId: string, message: string, signingAlgorithm: string, region: string): { signature: string; keyId: string; signingAlgorithm: string } {
+    const key = this.findKey(keyId, region);
+    if (!key.enabled) throw new AwsError("DisabledException", "Key is disabled", 400);
+    // Mock signature: HMAC the message with the keyId as "key"
+    const hasher = new Bun.CryptoHasher("sha256");
+    hasher.update(`${key.keyId}:${message}`);
+    const signature = hasher.digest("base64") as string;
+    return { signature, keyId: key.arn, signingAlgorithm: signingAlgorithm || "RSASSA_PSS_SHA_256" };
+  }
+
+  verify(keyId: string, message: string, signature: string, signingAlgorithm: string, region: string): { signatureValid: boolean; keyId: string; signingAlgorithm: string } {
+    const key = this.findKey(keyId, region);
+    if (!key.enabled) throw new AwsError("DisabledException", "Key is disabled", 400);
+    // Re-compute expected signature and compare
+    const hasher = new Bun.CryptoHasher("sha256");
+    hasher.update(`${key.keyId}:${message}`);
+    const expected = hasher.digest("base64") as string;
+    return { signatureValid: signature === expected, keyId: key.arn, signingAlgorithm: signingAlgorithm || "RSASSA_PSS_SHA_256" };
+  }
+
+  reEncrypt(ciphertextBlob: string, destinationKeyId: string, region: string): { ciphertextBlob: string; sourceKeyId: string; keyId: string } {
+    const decrypted = this.decrypt(ciphertextBlob, region);
+    const encrypted = this.encrypt(destinationKeyId, decrypted.plaintext, region);
+    return { ciphertextBlob: encrypted.ciphertextBlob, sourceKeyId: decrypted.keyId, keyId: encrypted.keyId };
+  }
+
+  createGrant(keyId: string, granteePrincipal: string, operations: string[], retiringPrincipal: string | undefined, name: string | undefined, region: string): { grantId: string; grantToken: string } {
+    const key = this.findKey(keyId, region);
+    const rk = this.regionKey(region, key.keyId);
+    const grants = this.grants.get(rk) ?? [];
+    const grantId = crypto.randomUUID();
+    const grantToken = crypto.randomUUID();
+    const grant: KmsGrant = {
+      grantId,
+      grantToken,
+      keyId: key.keyId,
+      granteePrincipal,
+      retiringPrincipal,
+      operations,
+      creationDate: Date.now() / 1000,
+      name,
+    };
+    grants.push(grant);
+    this.grants.set(rk, grants);
+    return { grantId, grantToken };
+  }
+
+  listGrants(keyId: string, region: string): KmsGrant[] {
+    const key = this.findKey(keyId, region);
+    return this.grants.get(this.regionKey(region, key.keyId)) ?? [];
+  }
+
+  revokeGrant(keyId: string, grantId: string, region: string): void {
+    const key = this.findKey(keyId, region);
+    const rk = this.regionKey(region, key.keyId);
+    const grants = this.grants.get(rk);
+    if (!grants) throw new AwsError("NotFoundException", `Grant not found: ${grantId}`, 400);
+    const idx = grants.findIndex((g) => g.grantId === grantId);
+    if (idx === -1) throw new AwsError("NotFoundException", `Grant not found: ${grantId}`, 400);
+    grants.splice(idx, 1);
   }
 
   private findKey(keyId: string, region: string): KmsKey {

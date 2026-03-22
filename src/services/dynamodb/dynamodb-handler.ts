@@ -48,13 +48,30 @@ export class DynamoDbHandler {
         case "UntagResource":
           this.service.untagResource(body.ResourceArn, body.TagKeys ?? [], ctx.region);
           return this.json({}, ctx);
+        case "UpdateTable":
+          return this.updateTable(body, ctx);
+        case "DescribeEndpoints":
+          return this.json(this.service.describeEndpoints(), ctx);
+        case "ExecuteStatement":
+          return this.executeStatement(body, ctx);
+        case "BatchExecuteStatement":
+          return this.batchExecuteStatement(body, ctx);
+        case "ExecuteTransaction":
+          return this.executeTransaction(body, ctx);
+        case "CreateBackup":
+          return this.createBackup(body, ctx);
+        case "DescribeBackup":
+          return this.describeBackup(body, ctx);
+        case "ListBackups":
+          return this.listBackupsAction(body, ctx);
+        case "DeleteBackup":
+          return this.deleteBackup(body, ctx);
+        case "RestoreTableFromBackup":
+          return this.restoreTableFromBackup(body, ctx);
+        case "UpdateContinuousBackups":
+          return this.updateContinuousBackups(body, ctx);
         case "DescribeContinuousBackups":
-          return this.json({
-            ContinuousBackupsDescription: {
-              ContinuousBackupsStatus: "DISABLED",
-              PointInTimeRecoveryDescription: { PointInTimeRecoveryStatus: "DISABLED" },
-            },
-          }, ctx);
+          return this.describeContinuousBackups(body, ctx);
         default:
           return this.error(new AwsError("UnknownOperationException", `Operation ${action} is not supported.`, 400), ctx);
       }
@@ -198,6 +215,106 @@ export class DynamoDbHandler {
     return this.json({
       TimeToLiveSpecification: body.TimeToLiveSpecification,
     }, ctx);
+  }
+
+  private updateTable(body: any, ctx: RequestContext): Response {
+    const table = this.service.updateTable(body, ctx.region);
+    return this.json({ TableDescription: this.tableToJson(table) }, ctx);
+  }
+
+  private executeStatement(body: any, ctx: RequestContext): Response {
+    const items = this.service.executeStatement(body.Statement, body.Parameters, ctx.region);
+    return this.json({ Items: items }, ctx);
+  }
+
+  private batchExecuteStatement(body: any, ctx: RequestContext): Response {
+    const result = this.service.batchExecuteStatement(body.Statements ?? [], ctx.region);
+    return this.json(result, ctx);
+  }
+
+  private executeTransaction(body: any, ctx: RequestContext): Response {
+    const result = this.service.executeTransaction(body.TransactStatements ?? [], ctx.region);
+    return this.json(result, ctx);
+  }
+
+  private createBackup(body: any, ctx: RequestContext): Response {
+    const backup = this.service.createBackup(body.TableName, body.BackupName, ctx.region);
+    return this.json({
+      BackupDetails: {
+        BackupArn: backup.backupArn,
+        BackupName: backup.backupName,
+        BackupStatus: backup.backupStatus,
+        BackupCreationDateTime: backup.backupCreationDateTime,
+      },
+    }, ctx);
+  }
+
+  private describeBackup(body: any, ctx: RequestContext): Response {
+    const backup = this.service.describeBackup(body.BackupArn);
+    return this.json({
+      BackupDescription: {
+        BackupDetails: {
+          BackupArn: backup.backupArn,
+          BackupName: backup.backupName,
+          BackupStatus: backup.backupStatus,
+          BackupCreationDateTime: backup.backupCreationDateTime,
+        },
+        SourceTableDetails: {
+          TableName: backup.tableName,
+          TableArn: backup.tableArn,
+          KeySchema: backup.keySchema,
+          ProvisionedThroughput: backup.provisionedThroughput,
+          BillingMode: backup.billingMode,
+        },
+      },
+    }, ctx);
+  }
+
+  private listBackupsAction(body: any, ctx: RequestContext): Response {
+    const backups = this.service.listBackups(body.TableName);
+    return this.json({
+      BackupSummaries: backups.map((b) => ({
+        TableName: b.tableName,
+        TableArn: b.tableArn,
+        BackupArn: b.backupArn,
+        BackupName: b.backupName,
+        BackupStatus: b.backupStatus,
+        BackupCreationDateTime: b.backupCreationDateTime,
+      })),
+    }, ctx);
+  }
+
+  private deleteBackup(body: any, ctx: RequestContext): Response {
+    const backup = this.service.deleteBackup(body.BackupArn);
+    return this.json({
+      BackupDescription: {
+        BackupDetails: {
+          BackupArn: backup.backupArn,
+          BackupName: backup.backupName,
+          BackupStatus: backup.backupStatus,
+          BackupCreationDateTime: backup.backupCreationDateTime,
+        },
+      },
+    }, ctx);
+  }
+
+  private restoreTableFromBackup(body: any, ctx: RequestContext): Response {
+    const table = this.service.restoreTableFromBackup(body.BackupArn, body.TargetTableName, ctx.region);
+    return this.json({ TableDescription: this.tableToJson(table) }, ctx);
+  }
+
+  private updateContinuousBackups(body: any, ctx: RequestContext): Response {
+    const result = this.service.updateContinuousBackups(
+      body.TableName,
+      ctx.region,
+      body.PointInTimeRecoverySpecification,
+    );
+    return this.json(result, ctx);
+  }
+
+  private describeContinuousBackups(body: any, ctx: RequestContext): Response {
+    const result = this.service.describeContinuousBackups(body.TableName, ctx.region);
+    return this.json(result, ctx);
   }
 
   private tableToJson(table: any): any {

@@ -17,6 +17,12 @@ export class StsQueryHandler {
           return this.assumeRole(params, ctx);
         case "GetSessionToken":
           return this.getSessionToken(params, ctx);
+        case "AssumeRoleWithWebIdentity":
+          return this.assumeRoleWithWebIdentity(params, ctx);
+        case "AssumeRoleWithSAML":
+          return this.assumeRoleWithSAML(params, ctx);
+        case "GetAccessKeyInfo":
+          return this.getAccessKeyInfo(params, ctx);
         default:
           return xmlErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }
@@ -69,5 +75,60 @@ export class StsQueryHandler {
       .end("Credentials")
       .build();
     return xmlResponse(xmlEnvelope("GetSessionToken", ctx.requestId, result, NS), ctx.requestId);
+  }
+
+  private assumeRoleWithWebIdentity(params: URLSearchParams, ctx: RequestContext): Response {
+    const role = this.service.assumeRoleWithWebIdentity(
+      params.get("RoleArn")!,
+      params.get("RoleSessionName")!,
+      params.get("WebIdentityToken")!,
+      parseInt(params.get("DurationSeconds") ?? "3600"),
+      ctx.region,
+    );
+    const result = new XmlBuilder()
+      .start("Credentials")
+        .elem("AccessKeyId", role.credentials.accessKeyId)
+        .elem("SecretAccessKey", role.credentials.secretAccessKey)
+        .elem("SessionToken", role.credentials.sessionToken)
+        .elem("Expiration", role.credentials.expiration)
+      .end("Credentials")
+      .start("AssumedRoleUser")
+        .elem("AssumedRoleId", role.assumedRoleUser.assumedRoleId)
+        .elem("Arn", role.assumedRoleUser.arn)
+      .end("AssumedRoleUser")
+      .elem("SubjectFromWebIdentityToken", role.subjectFromWebIdentityToken)
+      .build();
+    return xmlResponse(xmlEnvelope("AssumeRoleWithWebIdentity", ctx.requestId, result, NS), ctx.requestId);
+  }
+
+  private assumeRoleWithSAML(params: URLSearchParams, ctx: RequestContext): Response {
+    const role = this.service.assumeRoleWithSAML(
+      params.get("RoleArn")!,
+      params.get("PrincipalArn")!,
+      params.get("SAMLAssertion")!,
+      parseInt(params.get("DurationSeconds") ?? "3600"),
+      ctx.region,
+    );
+    const result = new XmlBuilder()
+      .start("Credentials")
+        .elem("AccessKeyId", role.credentials.accessKeyId)
+        .elem("SecretAccessKey", role.credentials.secretAccessKey)
+        .elem("SessionToken", role.credentials.sessionToken)
+        .elem("Expiration", role.credentials.expiration)
+      .end("Credentials")
+      .start("AssumedRoleUser")
+        .elem("AssumedRoleId", role.assumedRoleUser.assumedRoleId)
+        .elem("Arn", role.assumedRoleUser.arn)
+      .end("AssumedRoleUser")
+      .build();
+    return xmlResponse(xmlEnvelope("AssumeRoleWithSAML", ctx.requestId, result, NS), ctx.requestId);
+  }
+
+  private getAccessKeyInfo(params: URLSearchParams, ctx: RequestContext): Response {
+    const info = this.service.getAccessKeyInfo(params.get("AccessKeyId")!);
+    const result = new XmlBuilder()
+      .elem("Account", info.account)
+      .build();
+    return xmlResponse(xmlEnvelope("GetAccessKeyInfo", ctx.requestId, result, NS), ctx.requestId);
   }
 }

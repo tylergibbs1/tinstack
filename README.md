@@ -1,6 +1,6 @@
 # tinstack
 
-A lightweight, zero-dependency AWS local emulator written in TypeScript and running on [Bun](https://bun.sh). All 18 emulated services sit behind a single HTTP endpoint (default `:4566`). Point any AWS SDK at `http://localhost:4566` and it just works.
+A lightweight, zero-dependency AWS local emulator written in TypeScript and running on [Bun](https://bun.sh). All 38 emulated services sit behind a single HTTP endpoint (default `:4566`). Point any AWS SDK at `http://localhost:4566` and it just works.
 
 Inspired by [floci](https://github.com/hectorvent/floci) (Java/Quarkus) — rewritten from scratch in TypeScript for contributor accessibility, Bun's batteries-included APIs, and single-binary distribution.
 
@@ -30,56 +30,105 @@ const s3 = new S3Client({
 });
 ```
 
-## Supported Services (24)
+## Supported Services (38)
 
-### Core (Phase 1)
-
-| Service | Key Operations |
-|---|---|
-| **S3** | CreateBucket, PutObject, GetObject, DeleteObject, ListObjectsV1/V2, CopyObject, HeadObject, multipart upload, presigned URLs, virtual-host routing, versioning, tagging, CORS, bucket policies |
-| **SQS** | CreateQueue, SendMessage, ReceiveMessage, DeleteMessage, PurgeQueue, FIFO queues with deduplication, dead-letter queues, batch operations, visibility timeouts |
-| **DynamoDB** | CreateTable, PutItem, GetItem, UpdateItem, DeleteItem, Query, Scan, BatchWrite/Get, transactions, condition/filter/update/projection expressions, GSI/LSI, TTL, tagging |
-| **SSM Parameter Store** | PutParameter, GetParameter, GetParametersByPath, DeleteParameter, versioning, pagination, filters |
-| **Secrets Manager** | CreateSecret, GetSecretValue, UpdateSecret, PutSecretValue, DeleteSecret, version stages (AWSCURRENT/AWSPREVIOUS), random passwords, resource policies |
-
-### Messaging & Events (Phase 2)
+### Core
 
 | Service | Key Operations |
 |---|---|
-| **SNS** | CreateTopic, Publish, Subscribe, Unsubscribe, topic/subscription attributes, tagging, subscription confirmation |
-| **EventBridge** | PutEvents, PutRule, PutTargets, CreateEventBus, rule management, target management, tagging |
-| **Kinesis** | CreateStream, PutRecord, PutRecords, GetShardIterator, GetRecords, DescribeStreamSummary, tagging, retention period |
+| **S3** | Full object lifecycle, multipart upload, presigned URLs, versioning with delete markers, lifecycle rules, encryption config, object lock/retention/legal hold, bucket policies, CORS, tagging, notifications, website hosting, public access block, logging |
+| **SQS** | Standard + FIFO queues, deduplication, dead-letter queues (RedrivePolicy), batch operations, visibility timeouts, delay queues, permissions |
+| **DynamoDB** | CRUD, Query, Scan, BatchWrite/Get, transactions, PartiQL (ExecuteStatement), condition/filter/update/projection expressions with nested paths (`a.b.c`, `list[0]`), GSI/LSI, TTL, backups/restore, streams, tagging |
+| **SSM** | Parameter Store (CRUD, paths, versioning), Documents (CRUD, versioning), SendCommand, Maintenance Windows, tagging |
+| **Secrets Manager** | CRUD, version stages, rotation (RotateSecret/CancelRotateSecret), BatchGetSecretValue, resource policies, random passwords |
 
-### Auth & Compute (Phase 3)
-
-| Service | Key Operations |
-|---|---|
-| **STS** | GetCallerIdentity, AssumeRole, GetSessionToken |
-| **IAM** | CreateRole, CreateUser, CreatePolicy, AttachRolePolicy, inline policies, access keys, instance profiles, tagging, GetPolicy/GetPolicyVersion |
-| **KMS** | CreateKey, Encrypt, Decrypt, GenerateDataKey, CreateAlias, key enable/disable/schedule deletion, key policies, rotation status, tagging |
-| **Cognito** | CreateUserPool, CreateUserPoolClient, SignUp, ConfirmSignUp, AdminCreateUser, InitiateAuth, ForgotPassword, ChangePassword, AdminConfirmSignUp, JWT token generation |
-| **Lambda** | CreateFunction, Invoke (Docker / in-process / mock), UpdateFunctionCode/Configuration, event source mappings, versions, permissions, tagging |
-
-### Infrastructure (Phase 4)
+### Messaging & Events
 
 | Service | Key Operations |
 |---|---|
-| **CloudWatch Logs** | CreateLogGroup, CreateLogStream, PutLogEvents, GetLogEvents, FilterLogEvents, retention policies, tagging |
-| **CloudWatch Metrics** | PutMetricData, GetMetricData, GetMetricStatistics, ListMetrics, PutMetricAlarm, DescribeAlarms |
-| **DynamoDB Streams** | ListStreams, DescribeStream, GetShardIterator, GetRecords (INSERT/MODIFY/REMOVE events) |
-| **API Gateway v2** | CreateApi (HTTP API), routes, integrations, stages, deployments, authorizers, tagging |
-| **Step Functions** | CreateStateMachine, StartExecution, full ASL engine — Task, Pass, Wait, Choice (And/Or/Not), Parallel, Map, Succeed, Fail, Retry with backoff, Catch error handling |
+| **SNS** | Topics, Publish/PublishBatch, subscriptions with FilterPolicy evaluation, platform applications (mobile push), endpoints, confirmation, tagging |
+| **EventBridge** | PutEvents with pattern matching, rules (enable/disable), targets, event buses, archives, replays, connections, API destinations, permissions, tagging |
+| **Kinesis** | Streams, PutRecord/PutRecords, shard management (split/merge), consumers, encryption, tagging |
+| **Firehose** | Delivery streams, PutRecord/PutRecordBatch, encryption, tagging |
 
-### Networking & Containers (Phase 5)
+### Auth & Compute
 
 | Service | Key Operations |
 |---|---|
-| **EC2 / VPC** | VPCs, Subnets, Security Groups, Internet Gateways, Route Tables, NAT Gateways, Elastic IPs, Network ACLs, Availability Zones, tagging |
-| **ELBv2** | Application/Network Load Balancers, Target Groups, Listeners, attributes, tagging |
-| **ECR** | CreateRepository, DescribeRepositories, GetAuthorizationToken, PutImage, lifecycle policies, tagging |
-| **Route 53** | Hosted Zones, Resource Record Sets (A, AAAA, CNAME, MX, TXT, NS, SOA), tagging |
-| **SES v2** | Email identities, SendEmail, account info |
-| **ACM** | RequestCertificate, DescribeCertificate, ListCertificates, tagging |
+| **STS** | GetCallerIdentity, AssumeRole, AssumeRoleWithWebIdentity, AssumeRoleWithSAML, GetSessionToken, GetAccessKeyInfo |
+| **IAM** | Roles, Users, Groups, Policies (with version management, max 5), access keys, instance profiles, inline/managed policies, role tagging |
+| **KMS** | Keys, Encrypt/Decrypt, GenerateDataKey, Sign/Verify, ReEncrypt, grants, aliases, rotation, tagging |
+| **Cognito** | User pools, clients, users, groups, identity providers (SAML/OIDC), domains, password policy enforcement, InitiateAuth with JWT tokens, refresh flow, MFA config |
+| **Lambda** | Invoke (Docker/in-process/mock), versions, aliases, layers, permissions (resource policy), event source mappings, tagging |
+| **Step Functions** | Full ASL engine (Task, Pass, Choice, Wait, Parallel, Map, Succeed, Fail), Retry with backoff, Catch, activities, task callbacks |
+
+### Infrastructure
+
+| Service | Key Operations |
+|---|---|
+| **CloudFormation** | Stacks, change sets, stack sets with instances, GetTemplateSummary, template validation |
+| **CloudWatch Logs** | Log groups/streams, PutLogEvents, FilterLogEvents, metric filters, subscription filters, export tasks, resource policies, destinations |
+| **CloudWatch Metrics** | PutMetricData, GetMetricData, alarms (with SetAlarmState), dashboards, insight rules, tagging |
+| **DynamoDB Streams** | ListStreams, DescribeStream, GetShardIterator, GetRecords |
+| **API Gateway v2** | HTTP APIs, routes, integrations, stages, authorizers, tagging |
+
+### Networking & Containers
+
+| Service | Key Operations |
+|---|---|
+| **EC2 / VPC** | VPCs, Subnets (CIDR validation + overlap detection), Security Groups, Internet Gateways, Route Tables, NAT Gateways, Elastic IPs, Instances (Run/Start/Stop/Terminate), Key Pairs, EBS Volumes, AMIs, Network Interfaces, VPC Endpoints, Instance Types, resource dependency checks |
+| **ECS / Fargate** | Clusters, task definitions (revisions), services, tasks, container instances, task sets, capacity providers, tagging |
+| **ELBv2** | Load balancers, target groups, listeners, rules (path/host routing), target registration/health, tagging |
+| **ECR** | Repositories, images, authorization tokens, lifecycle policies, tagging |
+
+### DNS, Email, Certificates
+
+| Service | Key Operations |
+|---|---|
+| **Route 53** | Hosted zones, resource record sets (A, AAAA, CNAME, MX, TXT, NS, SOA), tagging |
+| **SES v2** | Email identities, SendEmail, templates, bulk email, configuration sets, suppression list, DKIM, send quota |
+| **ACM** | Certificates (request, describe, list, delete), tagging |
+
+### Security & CDN
+
+| Service | Key Operations |
+|---|---|
+| **WAFv2** | WebACLs, IP sets, rule groups, regex pattern sets, logging configuration, resource associations, tagging |
+| **CloudFront** | Distributions, invalidations, origin access control |
+
+### Config & Scheduling
+
+| Service | Key Operations |
+|---|---|
+| **AppConfig** | Applications, environments, configuration profiles, hosted configuration versions, deployments |
+| **EventBridge Scheduler** | Schedules, schedule groups, tagging |
+
+### Analytics
+
+| Service | Key Operations |
+|---|---|
+| **Athena** | WorkGroups, query execution with mock results, named queries, data catalogs, prepared statements |
+| **Glue** | Databases, tables, partitions, crawlers, ETL jobs with runs, triggers, connections, job bookmarks |
+
+### Database
+
+| Service | Key Operations |
+|---|---|
+| **RDS** | DB instances, clusters, subnet groups, snapshots, cluster snapshots, read replicas, start/stop/reboot |
+
+### AI/ML & Media
+
+| Service | Key Operations |
+|---|---|
+| **Bedrock Runtime** | InvokeModel (Claude/Titan mock responses), ListFoundationModels |
+| **Textract** | DetectDocumentText, AnalyzeDocument, async jobs |
+| **MediaConvert** | Jobs, queues, presets, job templates, endpoints |
+
+### Storage
+
+| Service | Key Operations |
+|---|---|
+| **EFS** | File systems, mount targets, access points, policies, tagging |
 
 ## Terraform Support
 
@@ -113,11 +162,32 @@ provider "aws" {
     cloudwatch      = "http://localhost:4566"
     apigatewayv2    = "http://localhost:4566"
     cognitoidp      = "http://localhost:4566"
+    ec2             = "http://localhost:4566"
+    ecs             = "http://localhost:4566"
+    ecr             = "http://localhost:4566"
+    elbv2           = "http://localhost:4566"
+    route53         = "http://localhost:4566"
+    ses             = "http://localhost:4566"
+    acm             = "http://localhost:4566"
+    rds             = "http://localhost:4566"
+    cloudformation  = "http://localhost:4566"
+    cloudfront      = "http://localhost:4566"
+    wafv2           = "http://localhost:4566"
+    athena          = "http://localhost:4566"
+    glue            = "http://localhost:4566"
+    firehose        = "http://localhost:4566"
+    appconfig       = "http://localhost:4566"
+    scheduler       = "http://localhost:4566"
+    appsync         = "http://localhost:4566"
+    efs             = "http://localhost:4566"
+    mediaconvert    = "http://localhost:4566"
+    bedrock         = "http://localhost:4566"
+    textract        = "http://localhost:4566"
   }
 }
 ```
 
-All Terraform resource lifecycle operations (create, read, update, delete) are supported for the 18 emulated services, including read-back attributes, tagging, and policy stubs that Terraform requires during plan/apply/refresh cycles.
+All Terraform resource lifecycle operations (create, read, update, delete) are supported for the 38 emulated services, including read-back attributes, tagging, and policy stubs that Terraform requires during plan/apply/refresh cycles.
 
 ## Configuration
 
@@ -135,9 +205,9 @@ All configuration via environment variables:
 
 ## Performance
 
-- Startup: **~20ms** with all 24 services
+- Startup: **~20ms** with all 38 services
 - API response: **<1ms** for in-memory operations
-- 171+ integration tests run in **~1.9s**
+- 1064+ integration tests run in **~3.5s**
 - Zero npm runtime dependencies — only Bun built-ins
 
 ## Storage Backends
@@ -156,7 +226,7 @@ Lambda supports three invocation modes, tried in order:
 
 ## Testing
 
-171+ tests across 24+ files covering happy paths, error paths, edge cases, and end-to-end multi-service architecture tests. All tests use real AWS SDK v3 clients pointed at the emulator.
+1064+ tests across 45 files covering happy paths, error paths, edge cases, cross-service integration, and end-to-end multi-service architecture tests. All tests use real AWS SDK v3 clients pointed at the emulator.
 
 ```bash
 bun install           # Install dependencies
@@ -194,9 +264,9 @@ docker build -t tinstack . && docker run -p 4566:4566 tinstack
 
 Single `Bun.serve()` HTTP server routing by AWS protocol:
 
-- **JSON 1.0/1.1** — `X-Amz-Target` header dispatches to service handlers (DynamoDB, SQS, SSM, Secrets Manager, SNS, EventBridge, Kinesis, KMS, Cognito, CloudWatch, Step Functions, ACM, ECR)
-- **Query/XML** — `Action` form param dispatches to handlers (STS, IAM, EC2, ELBv2, SNS legacy, SQS legacy)
-- **REST** — URL path matching for Lambda (`/2015-03-31/functions/...`), API Gateway (`/v2/apis/...`), Route 53 (`/2013-04-01/...`), SES (`/v2/email/...`)
+- **JSON 1.0/1.1** — `X-Amz-Target` header dispatches to service handlers (DynamoDB, SQS, SSM, Secrets Manager, SNS, EventBridge, Kinesis, KMS, Cognito, CloudWatch Logs/Metrics, Step Functions, ACM, ECR, ECS, Firehose, WAFv2, Athena, Glue, Textract, Bedrock)
+- **Query/XML** — `Action` form param dispatches to handlers (STS, IAM, EC2, ELBv2, RDS, CloudFormation, SNS legacy, SQS legacy)
+- **REST** — URL path matching for Lambda, API Gateway, Route 53, SES, AppConfig, Scheduler, CloudFront, AppSync, MediaConvert, Bedrock, EFS
 - **S3** — Fallback handler supporting both path-style and virtual-host routing
 
 Each service follows a consistent pattern: **Service** (business logic + storage) → **Handler** (protocol translation).

@@ -57,6 +57,63 @@ export class SnsJsonHandler {
           this.service.untagResource(body.ResourceArn, body.TagKeys ?? [], ctx.region);
           return this.json({}, ctx);
         }
+        case "PublishBatch": {
+          const entries = (body.PublishBatchRequestEntries ?? []).map((e: any) => ({
+            id: e.Id,
+            message: e.Message,
+            subject: e.Subject,
+            messageAttributes: e.MessageAttributes,
+          }));
+          const result = this.service.publishBatch(body.TopicArn, entries, ctx.region);
+          return this.json({
+            Successful: result.successful.map((s) => ({ Id: s.id, MessageId: s.messageId })),
+            Failed: result.failed.map((f) => ({ Id: f.id, Code: f.code, Message: f.message, SenderFault: f.senderFault })),
+          }, ctx);
+        }
+        case "ConfirmSubscription": {
+          const sub = this.service.confirmSubscription(body.TopicArn, body.Token, ctx.region);
+          return this.json({ SubscriptionArn: sub.subscriptionArn }, ctx);
+        }
+        case "CreatePlatformApplication": {
+          const app = this.service.createPlatformApplication(body.Name, body.Platform, body.Attributes ?? {}, ctx.region);
+          return this.json({ PlatformApplicationArn: app.platformApplicationArn }, ctx);
+        }
+        case "GetPlatformApplicationAttributes": {
+          const attrs = this.service.getPlatformApplicationAttributes(body.PlatformApplicationArn, ctx.region);
+          return this.json({ Attributes: attrs }, ctx);
+        }
+        case "SetPlatformApplicationAttributes": {
+          this.service.setPlatformApplicationAttributes(body.PlatformApplicationArn, body.Attributes ?? {}, ctx.region);
+          return this.json({}, ctx);
+        }
+        case "ListPlatformApplications": {
+          const apps = this.service.listPlatformApplications(ctx.region);
+          return this.json({ PlatformApplications: apps.map((a) => ({ PlatformApplicationArn: a.platformApplicationArn, Attributes: a.attributes })) }, ctx);
+        }
+        case "DeletePlatformApplication": {
+          this.service.deletePlatformApplication(body.PlatformApplicationArn, ctx.region);
+          return this.json({}, ctx);
+        }
+        case "CreatePlatformEndpoint": {
+          const ep = this.service.createPlatformEndpoint(body.PlatformApplicationArn, body.Token, body.Attributes ?? {}, ctx.region);
+          return this.json({ EndpointArn: ep.endpointArn }, ctx);
+        }
+        case "ListEndpointsByPlatformApplication": {
+          const eps = this.service.listEndpointsByPlatformApplication(body.PlatformApplicationArn, ctx.region);
+          return this.json({ Endpoints: eps.map((ep) => ({ EndpointArn: ep.endpointArn, Attributes: ep.attributes })) }, ctx);
+        }
+        case "DeleteEndpoint": {
+          this.service.deleteEndpoint(body.EndpointArn, ctx.region);
+          return this.json({}, ctx);
+        }
+        case "GetEndpointAttributes": {
+          const attrs = this.service.getEndpointAttributes(body.EndpointArn, ctx.region);
+          return this.json({ Attributes: attrs }, ctx);
+        }
+        case "SetEndpointAttributes": {
+          this.service.setEndpointAttributes(body.EndpointArn, body.Attributes ?? {}, ctx.region);
+          return this.json({}, ctx);
+        }
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }
@@ -185,6 +242,134 @@ export class SnsQueryHandler {
           }
           this.service.untagResource(resourceArn, tagKeys, ctx.region);
           return xmlResponse(xmlEnvelopeNoResult("UntagResource", ctx.requestId, NS), ctx.requestId);
+        }
+        case "PublishBatch": {
+          const topicArn = params.get("TopicArn")!;
+          const entries: { id: string; message: string; subject?: string }[] = [];
+          for (let i = 1; ; i++) {
+            const id = params.get(`PublishBatchRequestEntries.member.${i}.Id`);
+            if (!id) break;
+            entries.push({
+              id,
+              message: params.get(`PublishBatchRequestEntries.member.${i}.Message`) ?? "",
+              subject: params.get(`PublishBatchRequestEntries.member.${i}.Subject`) ?? undefined,
+            });
+          }
+          const result = this.service.publishBatch(topicArn, entries, ctx.region);
+          const xml = new XmlBuilder();
+          xml.start("Successful");
+          for (const s of result.successful) {
+            xml.start("member").elem("Id", s.id).elem("MessageId", s.messageId).end("member");
+          }
+          xml.end("Successful");
+          xml.start("Failed");
+          for (const f of result.failed) {
+            xml.start("member").elem("Id", f.id).elem("Code", f.code).elem("Message", f.message).elem("SenderFault", String(f.senderFault)).end("member");
+          }
+          xml.end("Failed");
+          return xmlResponse(xmlEnvelope("PublishBatch", ctx.requestId, xml.build(), NS), ctx.requestId);
+        }
+        case "ConfirmSubscription": {
+          const sub = this.service.confirmSubscription(params.get("TopicArn")!, params.get("Token")!, ctx.region);
+          return xmlResponse(xmlEnvelope("ConfirmSubscription", ctx.requestId, new XmlBuilder().elem("SubscriptionArn", sub.subscriptionArn).build(), NS), ctx.requestId);
+        }
+        case "CreatePlatformApplication": {
+          const attributes: Record<string, string> = {};
+          for (let i = 1; ; i++) {
+            const key = params.get(`Attributes.entry.${i}.key`);
+            const value = params.get(`Attributes.entry.${i}.value`);
+            if (!key) break;
+            attributes[key] = value ?? "";
+          }
+          const app = this.service.createPlatformApplication(params.get("Name")!, params.get("Platform")!, attributes, ctx.region);
+          return xmlResponse(xmlEnvelope("CreatePlatformApplication", ctx.requestId, new XmlBuilder().elem("PlatformApplicationArn", app.platformApplicationArn).build(), NS), ctx.requestId);
+        }
+        case "GetPlatformApplicationAttributes": {
+          const attrs = this.service.getPlatformApplicationAttributes(params.get("PlatformApplicationArn")!, ctx.region);
+          const xml = new XmlBuilder().start("Attributes");
+          for (const [k, v] of Object.entries(attrs)) {
+            xml.start("entry").elem("key", k).elem("value", v).end("entry");
+          }
+          xml.end("Attributes");
+          return xmlResponse(xmlEnvelope("GetPlatformApplicationAttributes", ctx.requestId, xml.build(), NS), ctx.requestId);
+        }
+        case "SetPlatformApplicationAttributes": {
+          const attrs: Record<string, string> = {};
+          for (let i = 1; ; i++) {
+            const key = params.get(`Attributes.entry.${i}.key`);
+            const value = params.get(`Attributes.entry.${i}.value`);
+            if (!key) break;
+            attrs[key] = value ?? "";
+          }
+          this.service.setPlatformApplicationAttributes(params.get("PlatformApplicationArn")!, attrs, ctx.region);
+          return xmlResponse(xmlEnvelopeNoResult("SetPlatformApplicationAttributes", ctx.requestId, NS), ctx.requestId);
+        }
+        case "ListPlatformApplications": {
+          const apps = this.service.listPlatformApplications(ctx.region);
+          const xml = new XmlBuilder().start("PlatformApplications");
+          for (const a of apps) {
+            xml.start("member").elem("PlatformApplicationArn", a.platformApplicationArn);
+            xml.start("Attributes");
+            for (const [k, v] of Object.entries(a.attributes)) {
+              xml.start("entry").elem("key", k).elem("value", v).end("entry");
+            }
+            xml.end("Attributes").end("member");
+          }
+          xml.end("PlatformApplications");
+          return xmlResponse(xmlEnvelope("ListPlatformApplications", ctx.requestId, xml.build(), NS), ctx.requestId);
+        }
+        case "DeletePlatformApplication": {
+          this.service.deletePlatformApplication(params.get("PlatformApplicationArn")!, ctx.region);
+          return xmlResponse(xmlEnvelopeNoResult("DeletePlatformApplication", ctx.requestId, NS), ctx.requestId);
+        }
+        case "CreatePlatformEndpoint": {
+          const attrs: Record<string, string> = {};
+          for (let i = 1; ; i++) {
+            const key = params.get(`Attributes.entry.${i}.key`);
+            const value = params.get(`Attributes.entry.${i}.value`);
+            if (!key) break;
+            attrs[key] = value ?? "";
+          }
+          const ep = this.service.createPlatformEndpoint(params.get("PlatformApplicationArn")!, params.get("Token")!, attrs, ctx.region);
+          return xmlResponse(xmlEnvelope("CreatePlatformEndpoint", ctx.requestId, new XmlBuilder().elem("EndpointArn", ep.endpointArn).build(), NS), ctx.requestId);
+        }
+        case "ListEndpointsByPlatformApplication": {
+          const eps = this.service.listEndpointsByPlatformApplication(params.get("PlatformApplicationArn")!, ctx.region);
+          const xml = new XmlBuilder().start("Endpoints");
+          for (const ep of eps) {
+            xml.start("member").elem("EndpointArn", ep.endpointArn);
+            xml.start("Attributes");
+            for (const [k, v] of Object.entries(ep.attributes)) {
+              xml.start("entry").elem("key", k).elem("value", v).end("entry");
+            }
+            xml.end("Attributes").end("member");
+          }
+          xml.end("Endpoints");
+          return xmlResponse(xmlEnvelope("ListEndpointsByPlatformApplication", ctx.requestId, xml.build(), NS), ctx.requestId);
+        }
+        case "DeleteEndpoint": {
+          this.service.deleteEndpoint(params.get("EndpointArn")!, ctx.region);
+          return xmlResponse(xmlEnvelopeNoResult("DeleteEndpoint", ctx.requestId, NS), ctx.requestId);
+        }
+        case "GetEndpointAttributes": {
+          const attrs = this.service.getEndpointAttributes(params.get("EndpointArn")!, ctx.region);
+          const xml = new XmlBuilder().start("Attributes");
+          for (const [k, v] of Object.entries(attrs)) {
+            xml.start("entry").elem("key", k).elem("value", v).end("entry");
+          }
+          xml.end("Attributes");
+          return xmlResponse(xmlEnvelope("GetEndpointAttributes", ctx.requestId, xml.build(), NS), ctx.requestId);
+        }
+        case "SetEndpointAttributes": {
+          const attrs: Record<string, string> = {};
+          for (let i = 1; ; i++) {
+            const key = params.get(`Attributes.entry.${i}.key`);
+            const value = params.get(`Attributes.entry.${i}.value`);
+            if (!key) break;
+            attrs[key] = value ?? "";
+          }
+          this.service.setEndpointAttributes(params.get("EndpointArn")!, attrs, ctx.region);
+          return xmlResponse(xmlEnvelopeNoResult("SetEndpointAttributes", ctx.requestId, NS), ctx.requestId);
         }
         default:
           return xmlErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);

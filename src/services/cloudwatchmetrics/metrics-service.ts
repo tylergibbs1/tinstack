@@ -55,13 +55,32 @@ interface StoredDatapoint {
 const TWO_WEEKS_SECONDS = 14 * 24 * 60 * 60;
 const PRUNE_INTERVAL = 1000;
 
+export interface Dashboard {
+  dashboardName: string;
+  dashboardArn: string;
+  dashboardBody: string;
+  lastModified: number;
+}
+
+export interface InsightRule {
+  ruleName: string;
+  ruleDefinition: string;
+  ruleState: string;
+}
+
 export class CloudWatchMetricsService {
   private datapoints: StoredDatapoint[] = [];
   private alarms: StorageBackend<string, MetricAlarm>;
+  private dashboards: StorageBackend<string, Dashboard>;
+  private resourceTags: StorageBackend<string, Record<string, string>>;
+  private insightRules: StorageBackend<string, InsightRule>;
   private insertsSincePrune = 0;
 
   constructor(private accountId: string) {
     this.alarms = new InMemoryStorage();
+    this.dashboards = new InMemoryStorage();
+    this.resourceTags = new InMemoryStorage();
+    this.insightRules = new InMemoryStorage();
   }
 
   private maybePrune(): void {
@@ -235,6 +254,154 @@ export class CloudWatchMetricsService {
     for (const name of alarmNames) {
       this.alarms.delete(this.regionKey(region, name));
     }
+  }
+
+  setAlarmState(alarmName: string, stateValue: string, stateReason: string, region: string): void {
+    const key = this.regionKey(region, alarmName);
+    const alarm = this.alarms.get(key);
+    if (!alarm) throw new AwsError("ResourceNotFound", `Alarm ${alarmName} does not exist.`, 404);
+    alarm.stateValue = stateValue;
+    alarm.stateReason = stateReason;
+    alarm.stateUpdatedTimestamp = Date.now() / 1000;
+    this.alarms.set(key, alarm);
+  }
+
+  enableAlarmActions(alarmNames: string[], region: string): void {
+    for (const name of alarmNames) {
+      const key = this.regionKey(region, name);
+      const alarm = this.alarms.get(key);
+      if (alarm) {
+        alarm.actionsEnabled = true;
+        this.alarms.set(key, alarm);
+      }
+    }
+  }
+
+  disableAlarmActions(alarmNames: string[], region: string): void {
+    for (const name of alarmNames) {
+      const key = this.regionKey(region, name);
+      const alarm = this.alarms.get(key);
+      if (alarm) {
+        alarm.actionsEnabled = false;
+        this.alarms.set(key, alarm);
+      }
+    }
+  }
+
+  describeAlarmsForMetric(metricName: string, namespace: string, region: string): MetricAlarm[] {
+    return this.alarms.values().filter((a) => {
+      if (!a.alarmArn.includes(`:${region}:`)) return false;
+      return a.metricName === metricName && a.namespace === namespace;
+    });
+  }
+
+  putDashboard(dashboardName: string, dashboardBody: string, region: string): void {
+    const key = this.regionKey(region, dashboardName);
+    const dashboard: Dashboard = {
+      dashboardName,
+      dashboardArn: buildArn("cloudwatch", region, this.accountId, "dashboard/", dashboardName),
+      dashboardBody,
+      lastModified: Date.now() / 1000,
+    };
+    this.dashboards.set(key, dashboard);
+  }
+
+  getDashboard(dashboardName: string, region: string): Dashboard {
+    const key = this.regionKey(region, dashboardName);
+    const dashboard = this.dashboards.get(key);
+    if (!dashboard) throw new AwsError("ResourceNotFound", `Dashboard ${dashboardName} does not exist.`, 404);
+    return dashboard;
+  }
+
+  listDashboards(region: string, prefix?: string): Dashboard[] {
+    return this.dashboards.values().filter((d) => {
+      if (!d.dashboardArn.includes(`:${region}:`)) return false;
+      if (prefix && !d.dashboardName.startsWith(prefix)) return false;
+      return true;
+    });
+  }
+
+  deleteDashboards(dashboardNames: string[], region: string): void {
+    for (const name of dashboardNames) {
+      const key = this.regionKey(region, name);
+      if (!this.dashboards.has(key)) {
+        throw new AwsError("ResourceNotFound", `Dashboard ${name} does not exist.`, 404);
+      }
+      this.dashboards.delete(key);
+    }
+  }
+
+  // --- Tagging ---
+
+  tagResource(resourceArn: string, tags: { Key: string; Value: string }[]): void {
+    const existing = this.resourceTags.get(resourceArn) ?? {};
+    for (const tag of tags) {
+      existing[tag.Key] = tag.Value;
+    }
+    this.resourceTags.set(resourceArn, existing);
+  }
+
+  untagResource(resourceArn: string, tagKeys: string[]): void {
+    const existing = this.resourceTags.get(resourceArn);
+    if (existing) {
+      for (const key of tagKeys) {
+        delete existing[key];
+      }
+      this.resourceTags.set(resourceArn, existing);
+    }
+  }
+
+  listTagsForResource(resourceArn: string): { Key: string; Value: string }[] {
+    const existing = this.resourceTags.get(resourceArn) ?? {};
+    return Object.entries(existing).map(([Key, Value]) => ({ Key, Value }));
+  }
+
+  // --- Insight Rules ---
+
+  putInsightRule(ruleName: string, ruleDefinition: string, ruleState: string | undefined, region: string): void {
+    const key = this.regionKey(region, ruleName);
+    this.insightRules.set(key, {
+      ruleName,
+      ruleDefinition,
+      ruleState: ruleState ?? "ENABLED",
+    });
+  }
+
+  describeInsightRules(region: string): InsightRule[] {
+    return this.insightRules.values().filter((r) =>
+      this.insightRules.has(this.regionKey(region, r.ruleName)),
+    );
+  }
+
+  enableInsightRules(ruleNames: string[], region: string): { failures: any[] } {
+    for (const name of ruleNames) {
+      const key = this.regionKey(region, name);
+      const rule = this.insightRules.get(key);
+      if (rule) {
+        rule.ruleState = "ENABLED";
+        this.insightRules.set(key, rule);
+      }
+    }
+    return { failures: [] };
+  }
+
+  disableInsightRules(ruleNames: string[], region: string): { failures: any[] } {
+    for (const name of ruleNames) {
+      const key = this.regionKey(region, name);
+      const rule = this.insightRules.get(key);
+      if (rule) {
+        rule.ruleState = "DISABLED";
+        this.insightRules.set(key, rule);
+      }
+    }
+    return { failures: [] };
+  }
+
+  deleteInsightRules(ruleNames: string[], region: string): { failures: any[] } {
+    for (const name of ruleNames) {
+      this.insightRules.delete(this.regionKey(region, name));
+    }
+    return { failures: [] };
   }
 }
 

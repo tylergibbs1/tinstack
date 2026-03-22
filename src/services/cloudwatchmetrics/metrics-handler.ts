@@ -43,6 +43,58 @@ export class CloudWatchMetricsHandler {
         case "DeleteAlarms":
           this.service.deleteAlarms(body.AlarmNames, ctx.region);
           return this.json({}, ctx);
+        case "SetAlarmState":
+          this.service.setAlarmState(body.AlarmName, body.StateValue, body.StateReason, ctx.region);
+          return this.json({}, ctx);
+        case "EnableAlarmActions":
+          this.service.enableAlarmActions(body.AlarmNames, ctx.region);
+          return this.json({}, ctx);
+        case "DisableAlarmActions":
+          this.service.disableAlarmActions(body.AlarmNames, ctx.region);
+          return this.json({}, ctx);
+        case "DescribeAlarmsForMetric":
+          return this.json({
+            MetricAlarms: this.service.describeAlarmsForMetric(body.MetricName, body.Namespace, ctx.region).map(alarmToJson),
+          }, ctx);
+        case "PutDashboard":
+          this.service.putDashboard(body.DashboardName, body.DashboardBody, ctx.region);
+          return this.json({ DashboardValidationMessages: [] }, ctx);
+        case "GetDashboard": {
+          const d = this.service.getDashboard(body.DashboardName, ctx.region);
+          return this.json({ DashboardName: d.dashboardName, DashboardArn: d.dashboardArn, DashboardBody: d.dashboardBody }, ctx);
+        }
+        case "ListDashboards":
+          return this.json({
+            DashboardEntries: this.service.listDashboards(ctx.region, body.DashboardNamePrefix).map((d) => ({
+              DashboardName: d.dashboardName, DashboardArn: d.dashboardArn, LastModified: d.lastModified,
+            })),
+          }, ctx);
+        case "DeleteDashboards":
+          this.service.deleteDashboards(body.DashboardNames, ctx.region);
+          return this.json({}, ctx);
+        case "TagResource":
+          this.service.tagResource(body.ResourceARN, body.Tags ?? []);
+          return this.json({}, ctx);
+        case "UntagResource":
+          this.service.untagResource(body.ResourceARN, body.TagKeys ?? []);
+          return this.json({}, ctx);
+        case "ListTagsForResource":
+          return this.json({ Tags: this.service.listTagsForResource(body.ResourceARN) }, ctx);
+        case "PutInsightRule":
+          this.service.putInsightRule(body.RuleName, body.RuleDefinition, body.RuleState, ctx.region);
+          return this.json({}, ctx);
+        case "DescribeInsightRules":
+          return this.json({
+            InsightRules: this.service.describeInsightRules(ctx.region).map((r) => ({
+              Name: r.ruleName, Definition: r.ruleDefinition, State: r.ruleState,
+            })),
+          }, ctx);
+        case "EnableInsightRules":
+          return this.json(this.service.enableInsightRules(body.RuleNames, ctx.region), ctx);
+        case "DisableInsightRules":
+          return this.json(this.service.disableInsightRules(body.RuleNames, ctx.region), ctx);
+        case "DeleteInsightRules":
+          return this.json(this.service.deleteInsightRules(body.RuleNames, ctx.region), ctx);
         default:
           return jsonErrorResponse(new AwsError("UnsupportedOperation", `Operation ${action} is not supported.`, 400), ctx.requestId);
       }
