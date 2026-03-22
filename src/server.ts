@@ -36,6 +36,9 @@ import { KmsHandler } from "./services/kms/kms-handler";
 import { CognitoService } from "./services/cognito/cognito-service";
 import { CognitoHandler } from "./services/cognito/cognito-handler";
 
+import { LambdaService } from "./services/lambda/lambda-service";
+import { LambdaHandler } from "./services/lambda/lambda-handler";
+
 // Phase 4 — Infrastructure
 import { CloudWatchLogsService } from "./services/cloudwatchlogs/logs-service";
 import { CloudWatchLogsHandler } from "./services/cloudwatchlogs/logs-handler";
@@ -43,6 +46,8 @@ import { CloudWatchMetricsService } from "./services/cloudwatchmetrics/metrics-s
 import { CloudWatchMetricsHandler } from "./services/cloudwatchmetrics/metrics-handler";
 import { DynamoDbStreamsService } from "./services/dynamodb/streams-service";
 import { DynamoDbStreamsHandler } from "./services/dynamodb/streams-handler";
+import { ApiGatewayService } from "./services/apigateway/apigateway-service";
+import { ApiGatewayHandler } from "./services/apigateway/apigateway-handler";
 
 function isEnabled(config: TinstackConfig, serviceName: string): boolean {
   if (config.enabledServices === "*") return true;
@@ -148,6 +153,21 @@ export function createServer(config: TinstackConfig) {
     enabledNames.push("DynamoDB Streams");
   }
 
+  // REST-style services (Lambda, API Gateway)
+  let lambdaHandler: LambdaHandler | undefined;
+  if (isEnabled(config, "lambda")) {
+    const lambdaService = new LambdaService(config.defaultAccountId, config.storagePath);
+    lambdaHandler = new LambdaHandler(lambdaService);
+    enabledNames.push("Lambda");
+  }
+
+  let apiGatewayHandler: ApiGatewayHandler | undefined;
+  if (isEnabled(config, "apigateway") || isEnabled(config, "apigatewayv2")) {
+    const apiGatewayService = new ApiGatewayService(config.defaultAccountId, config.baseUrl);
+    apiGatewayHandler = new ApiGatewayHandler(apiGatewayService);
+    enabledNames.push("API Gateway");
+  }
+
   const s3Router = (globalThis as any).__tinstackS3Router as S3Router | undefined;
 
   const server = Bun.serve({
@@ -190,6 +210,21 @@ export function createServer(config: TinstackConfig) {
         const actionParam = url.searchParams.get("Action");
         if (actionParam) {
           const response = queryRouter.dispatch(actionParam, url.searchParams, ctx, req.headers.get("authorization"));
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        // REST-style services (Lambda, API Gateway) — route by path prefix
+        const pathname = new URL(req.url).pathname;
+
+        if (lambdaHandler && (pathname.startsWith("/2015-03-31/functions") || pathname.startsWith("/2015-03-31/event-source-mappings") || pathname.startsWith("/2019-09-25/tags"))) {
+          const response = await lambdaHandler.handleRoute(req, ctx);
+          logRequest(req, response, startTime);
+          return response;
+        }
+
+        if (apiGatewayHandler && pathname.startsWith("/v2/apis")) {
+          const response = await apiGatewayHandler.handleRoute(req, ctx);
           logRequest(req, response, startTime);
           return response;
         }
