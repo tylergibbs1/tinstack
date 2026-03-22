@@ -201,6 +201,61 @@ final class TinstackEngine {
             serviceStats[idx].lastRequest = Date()
             if status >= 400 { serviceStats[idx].errorCount += 1 }
         }
+
+        // Sync to widgets every 10 requests
+        if totalRequests % 10 == 0 { syncToWidgets() }
+    }
+
+    private func syncToWidgets() {
+        let topServices = serviceStats
+            .filter { $0.requestCount > 0 }
+            .sorted { $0.requestCount > $1.requestCount }
+            .prefix(10)
+
+        let widgetStatus = WidgetStatus(
+            isRunning: isRunning,
+            port: port,
+            region: region,
+            totalRequests: totalRequests,
+            totalErrors: serviceStats.reduce(0) { $0 + $1.errorCount },
+            activeServiceCount: serviceStats.filter { $0.requestCount > 0 }.count,
+            uptimeSeconds: Int(Date().timeIntervalSince(uptimeStart ?? Date())),
+            topServices: topServices.map {
+                WidgetStatus.ServiceSnapshot(name: $0.name, requestCount: $0.requestCount, errorCount: $0.errorCount)
+            },
+            recentRequests: requestLog.prefix(5).map {
+                WidgetStatus.RequestSnapshot(id: $0.id.uuidString, method: $0.method, service: $0.service, target: $0.target, status: $0.status, durationMs: $0.duration, timestamp: $0.timestamp)
+            },
+            lastUpdated: Date()
+        )
+        widgetStatus.save()
+    }
+
+    /// Lightweight Codable struct for sharing with the widget extension.
+    struct WidgetStatus: Codable {
+        var isRunning: Bool
+        var port: Int
+        var region: String
+        var totalRequests: Int
+        var totalErrors: Int
+        var activeServiceCount: Int
+        var uptimeSeconds: Int
+        var topServices: [ServiceSnapshot]
+        var recentRequests: [RequestSnapshot]
+        var lastUpdated: Date
+
+        struct ServiceSnapshot: Codable { var name: String; var requestCount: Int; var errorCount: Int }
+        struct RequestSnapshot: Codable { var id: String; var method: String; var service: String; var target: String; var status: Int; var durationMs: String; var timestamp: Date }
+
+        private static let suiteName = "group.com.tinstack.app"
+        private static let key = "tinstack_status"
+
+        func save() {
+            guard let defaults = UserDefaults(suiteName: WidgetStatus.suiteName),
+                  let data = try? JSONEncoder().encode(self)
+            else { return }
+            defaults.set(data, forKey: WidgetStatus.key)
+        }
     }
 
     private func resolveService(target: String) -> String {
