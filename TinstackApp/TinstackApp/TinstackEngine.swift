@@ -2,6 +2,7 @@ import Foundation
 import Observation
 
 @Observable
+@MainActor
 final class TinstackEngine {
     var isRunning = false
     var port: Int = 4566
