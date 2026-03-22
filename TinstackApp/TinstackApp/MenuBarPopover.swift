@@ -114,11 +114,11 @@ private struct ServerHeader: View {
             // Status icon
             ZStack {
                 Circle()
-                    .fill(isRunning ? Color.green.opacity(0.15) : Color.gray.opacity(0.1))
+                    .fill(isRunning ? Color.green.opacity(0.15) : Color.red.opacity(0.1))
                     .frame(width: 36, height: 36)
                 Image(systemName: isRunning ? "bolt.fill" : "bolt.slash")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(isRunning ? Color.green : Color.gray)
+                    .foregroundStyle(isRunning ? Color.green : Color.red)
             }
 
             VStack(alignment: .leading, spacing: 2) {

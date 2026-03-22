@@ -54,7 +54,7 @@ struct DashboardView: View {
         ToolbarItem(placement: .navigation) {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(engine.isRunning ? Color.green : Color.gray)
+                    .fill(engine.isRunning ? Color.green : Color.red)
                     .frame(width: 8, height: 8)
                 Text(engine.isRunning ? ":\(engine.port)" : "Stopped")
                     .font(.caption.monospacedDigit())
