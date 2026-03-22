@@ -7,7 +7,7 @@ Lightweight AWS local emulator in TypeScript + Bun. Inspired by [floci](https://
 
 - `bun run start` — start the server on :4566
 - `bun run dev` — start with --watch for hot reload
-- `bun test` — run all tests (2120+ tests across 143 files)
+- `bun test` — run all tests (2223+ tests across 167 files)
 - `bun test tests/s3.test.ts` — run a single test file
 - `bun run build` — compile to standalone binary
 
@@ -21,26 +21,33 @@ Single HTTP server on port 4566. Routing by protocol:
 
 Each service: `Service` (business logic + storage) → `Handler` (protocol translation).
 
-## Enabled Services (135)
+## Enabled Services (158)
 
 | Category | Services |
 |---|---|
-| **Core** | S3, SQS, DynamoDB, SSM, Secrets Manager |
-| **Messaging** | SNS, EventBridge, Kinesis, Firehose |
-| **Auth & Compute** | STS, IAM, KMS, Cognito, Lambda, Step Functions |
-| **Containers** | ECS/Fargate, ECR, ELBv2 |
-| **Networking** | EC2/VPC (instances, volumes, AMIs, ENIs, VPC endpoints) |
-| **API** | API Gateway v2, AppSync |
-| **Infrastructure** | CloudFormation, CloudWatch Logs, CloudWatch Metrics, DynamoDB Streams |
-| **DNS/Email/Certs** | Route 53, SES v2, ACM |
-| **Security** | WAFv2 |
+| **Core** | S3, S3 Control, SQS, DynamoDB, SSM, Secrets Manager |
+| **Messaging** | SNS, EventBridge, EventBridge Pipes, Kinesis, Firehose |
+| **Auth & Compute** | STS, IAM, KMS, Cognito (IdP + Identity), Lambda, Step Functions |
+| **Containers & Orchestration** | ECS/Fargate, ECR, ELBv2, ELB Classic, EKS, Auto Scaling, App Auto Scaling, Batch |
+| **Networking** | EC2/VPC, Direct Connect, VPC Lattice, Network Firewall, Network Manager |
+| **API** | API Gateway v1, API Gateway v2, API Gateway Management, AppSync |
+| **Infrastructure** | CloudFormation, CloudWatch Logs/Metrics, DynamoDB Streams, CloudTrail, Config, Cloud Control |
+| **DNS/Email/Certs** | Route 53, Route 53 Resolver, Route 53 Domains, SES v1/v2, ACM, ACM PCA |
+| **Security** | WAFv2, GuardDuty, Security Hub, Inspector v2, Shield, Macie2 |
 | **CDN** | CloudFront |
-| **Config** | AppConfig, EventBridge Scheduler |
-| **Analytics** | Athena, Glue |
-| **Database** | RDS |
-| **Media** | MediaConvert |
-| **AI/ML** | Bedrock Runtime, Textract |
-| **Storage** | EFS |
+| **Identity** | SSO Admin, Identity Store, Cognito Identity |
+| **Config & Scheduling** | AppConfig, EventBridge Scheduler |
+| **CI/CD** | CodeBuild, CodePipeline, CodeDeploy, CodeCommit |
+| **Analytics** | Athena, Glue, Lake Formation, Redshift, Redshift Data, EMR, EMR Serverless, EMR Containers, Kinesis Analytics, OpenSearch, OpenSearch Serverless, Elasticsearch (legacy), QuickSight |
+| **Database** | RDS, RDS Data, DAX, ElastiCache, MemoryDB, Timestream Write/Query, Timestream InfluxDB, DSQL |
+| **AI/ML** | Bedrock Runtime, Bedrock Agent, SageMaker, SageMaker Runtime/Metrics, Textract, Rekognition, Comprehend, Transcribe, Polly, Personalize, Forecast, Lex V2 |
+| **Media** | MediaConvert, MediaLive, MediaConnect, MediaPackage, MediaPackage V2, MediaStore, MediaStore Data |
+| **Storage** | EFS, FSx, Glacier, EBS, S3 Tables, S3 Vectors, Backup |
+| **IoT** | IoT Core, IoT Data, Greengrass, Kinesis Video, Kinesis Video Archived Media |
+| **Migration** | DMS, DataSync, Transfer Family |
+| **Management** | Organizations, Budgets, Cost Explorer, Support, Service Quotas, Resource Groups, RGTA, Account |
+| **Messaging & Comms** | Connect, Connect Campaigns, MQ, MSK (Kafka), Pinpoint, IVS |
+| **Other** | X-Ray, Synthetics, RAM, WorkSpaces, WorkSpaces Web, Elastic Beanstalk, Data Pipeline, DataBrew, Directory Service, AMP, App Mesh, CloudHSM v2, Cloud Directory, Service Catalog, SC AppRegistry, Signer, SWF, Panorama, OSIS, Resilience Hub, Managed Blockchain, Metering Marketplace, EC2 Instance Connect, SimpleDB, Network Manager |
 
 ## Storage Backends
 
@@ -63,4 +70,4 @@ Each service: `Service` (business logic + storage) → `Handler` (protocol trans
 
 ## Testing
 
-2120+ tests across 143 files using real AWS SDK v3 clients pointed at the local emulator. Each test file starts the server in `beforeAll` and stops in `afterAll`. The shared test config is in `tests/helpers.ts`. Full suite runs in ~3.5s.
+2223+ tests across 167 files using real AWS SDK v3 clients pointed at the local emulator. Each test file starts the server in `beforeAll` and stops in `afterAll`. The shared test config is in `tests/helpers.ts`. Full suite runs in ~5.5s.
