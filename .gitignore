@@ -40,3 +40,4 @@ data/
 # compiled binary
 tinstack
 tinstack-*
+.breadcrumbs.json
