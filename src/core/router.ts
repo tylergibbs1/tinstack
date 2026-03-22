@@ -3,7 +3,7 @@ import { AwsError, jsonErrorResponse } from "./errors";
 import { logger } from "./logger";
 
 interface JsonServiceHandler {
-  handle(action: string, body: any, ctx: RequestContext): Response;
+  handle(action: string, body: any, ctx: RequestContext): Response | Promise<Response>;
 }
 
 // Maps X-Amz-Target prefix to handler
@@ -30,7 +30,7 @@ export class JsonRouter {
     this.handlers.set(serviceName, handler);
   }
 
-  dispatch(target: string, body: any, ctx: RequestContext): Response {
+  dispatch(target: string, body: any, ctx: RequestContext): Response | Promise<Response> {
     const dotIdx = target.indexOf(".");
     if (dotIdx === -1) {
       return jsonErrorResponse(new AwsError("UnknownOperationException", `Invalid target: ${target}`, 400), ctx.requestId);

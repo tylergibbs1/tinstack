@@ -38,6 +38,8 @@ import { CognitoHandler } from "./services/cognito/cognito-handler";
 
 import { LambdaService } from "./services/lambda/lambda-service";
 import { LambdaHandler } from "./services/lambda/lambda-handler";
+import { StepFunctionsService } from "./services/stepfunctions/stepfunctions-service";
+import { StepFunctionsHandler } from "./services/stepfunctions/stepfunctions-handler";
 
 // Phase 4 — Infrastructure
 import { CloudWatchLogsService } from "./services/cloudwatchlogs/logs-service";
@@ -168,6 +170,24 @@ export function createServer(config: TinstackConfig) {
     enabledNames.push("API Gateway");
   }
 
+  if (isEnabled(config, "states")) {
+    const taskInvoker = async (resource: string, input: any) => {
+      // If Lambda is enabled and resource is a Lambda function ARN, invoke it
+      if (lambdaHandler && resource.includes(":function:")) {
+        const fnName = resource.split(":function:").pop()!;
+        const lambdaSvc = (lambdaHandler as any).service as LambdaService;
+        const result = await lambdaSvc.invoke(fnName, JSON.stringify(input), "RequestResponse", config.defaultRegion);
+        try { return JSON.parse(result.payload); } catch { return result.payload; }
+      }
+      // Mock: return input as output
+      return input;
+    };
+    const sfService = new StepFunctionsService(config.defaultAccountId, taskInvoker);
+    const sfHandler = new StepFunctionsHandler(sfService);
+    jsonRouter.register("stepfunctions", sfHandler);
+    enabledNames.push("Step Functions");
+  }
+
   const s3Router = (globalThis as any).__tinstackS3Router as S3Router | undefined;
 
   const server = Bun.serve({
@@ -184,7 +204,7 @@ export function createServer(config: TinstackConfig) {
         // JSON 1.0 / 1.1 protocol (DynamoDB, SQS, SSM, Secrets Manager, etc.)
         if (target && (contentType.includes("amz-json") || contentType.includes("application/json"))) {
           const body = await req.json();
-          const response = jsonRouter.dispatch(target, body, ctx);
+          const response = await jsonRouter.dispatch(target, body, ctx);
           logRequest(req, response, startTime);
           return response;
         }
