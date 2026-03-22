@@ -42,3 +42,4 @@ tinstack
 tinstack-*
 .breadcrumbs.json
 tests/terraform/
+.agents/
