@@ -7,10 +7,16 @@
 <p align="center">A lightweight, zero-dependency AWS local emulator written in TypeScript and running on <a href="https://bun.sh">Bun</a>. All 158 emulated services sit behind a single HTTP endpoint (default <code>:4566</code>). Point any AWS SDK at <code>http://localhost:4566</code> and it just works.</p>
 
 <p align="center">
+  <a href="https://github.com/tylergibbs1/tinstack/actions/workflows/ci.yml"><img src="https://github.com/tylergibbs1/tinstack/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+</p>
+
+<p align="center">
   Inspired by <a href="https://github.com/hectorvent/floci">floci</a> (Java/Quarkus) — rewritten from scratch in TypeScript for contributor accessibility, Bun's batteries-included APIs, and single-binary distribution.
 </p>
 
-## Quick Start
+## Quick start
+
+Download a prebuilt binary (Linux, macOS, Windows) or the macOS menu bar app from [Releases](https://github.com/tylergibbs1/tinstack/releases), or run from source:
 
 ```bash
 # Run directly
@@ -35,6 +41,120 @@ const s3 = new S3Client({
   forcePathStyle: true,
 });
 ```
+
+## How it works
+
+Single `Bun.serve()` HTTP server routing by AWS protocol:
+
+- **JSON 1.0/1.1** — `X-Amz-Target` header dispatches to service handlers (DynamoDB, SQS, SSM, Secrets Manager, SNS, EventBridge, Kinesis, KMS, Cognito, CloudWatch Logs/Metrics, Step Functions, ACM, ECR, ECS, Firehose, WAFv2, Athena, Glue, Textract, Bedrock)
+- **Query/XML** — `Action` form param dispatches to handlers (STS, IAM, EC2, ELBv2, RDS, CloudFormation, SNS legacy, SQS legacy)
+- **REST** — URL path matching for Lambda, API Gateway, Route 53, SES, AppConfig, Scheduler, CloudFront, AppSync, MediaConvert, Bedrock, EFS
+- **S3** — Fallback handler supporting both path-style and virtual-host routing
+
+Each service follows a consistent pattern: **Service** (business logic + storage) → **Handler** (protocol translation).
+
+## Features
+
+- **158 services, one endpoint**: everything is served from `http://localhost:4566`; see the [service list](#supported-services-158).
+- **Terraform drop-in**: works as a LocalStack replacement for the AWS provider ([config](#terraform-support)).
+- **Pluggable storage**: in-memory, SQLite, or hybrid write-behind ([details](#storage-backends)).
+- **Real Lambda execution**: Docker, in-process, or mock invocation ([details](#lambda-invocation-modes)).
+- **Single binary**: `bun build --compile` produces a standalone executable; prebuilt for Linux, macOS, and Windows.
+- **macOS menu bar app**: a SwiftUI app in [`TinstackApp/`](TinstackApp/) with a menu bar popover, dashboard window, and settings.
+
+### Performance
+
+- Startup: **~20ms** with all 158 services
+- API response: **<1ms** for in-memory operations
+- 2223+ integration tests run in **~5.5s**
+- Zero npm runtime dependencies — only Bun built-ins
+
+### Storage Backends
+
+- **memory** (default) — `Map`-based, fastest, data lost on restart
+- **sqlite** — `bun:sqlite` with WAL mode, persists to `tinstack.sqlite`
+- **hybrid** — In-memory reads with periodic SQLite write-behind, best of both
+
+### Lambda Invocation Modes
+
+Lambda supports three invocation modes, tried in order:
+
+1. **Docker** — Uses official AWS Lambda runtime images (`public.ecr.aws/lambda/nodejs:20`, etc.) for real execution. Requires Docker.
+2. **In-process** — Imports and runs JS/TS handlers directly in Bun. Fast, no Docker needed.
+3. **Mock** — Returns a stub response when no valid code ZIP is available.
+
+## Configuration
+
+All configuration via environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `4566` | HTTP listen port |
+| `TINSTACK_DEFAULT_REGION` | `us-east-1` | Fallback region |
+| `TINSTACK_DEFAULT_ACCOUNT_ID` | `000000000000` | Fallback account ID |
+| `TINSTACK_STORAGE_MODE` | `memory` | `memory`, `sqlite`, `hybrid` |
+| `TINSTACK_STORAGE_PATH` | `./data` | Data directory for persistent modes |
+| `TINSTACK_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `TINSTACK_ENABLED_SERVICES` | `*` | Comma-separated list, or `*` for all |
+
+## Terraform Support
+
+tinstack works as a drop-in replacement for LocalStack with Terraform. Configure the AWS provider to point all endpoints at `http://localhost:4566`:
+
+```hcl
+provider "aws" {
+  region                      = "us-east-1"
+  access_key                  = "test"
+  secret_key                  = "test"
+  skip_credentials_validation = true
+  skip_metadata_api_check     = true
+  skip_requesting_account_id  = true
+  s3_use_path_style           = true
+
+  endpoints {
+    s3              = "http://localhost:4566"
+    dynamodb        = "http://localhost:4566"
+    sqs             = "http://localhost:4566"
+    sns             = "http://localhost:4566"
+    ssm             = "http://localhost:4566"
+    secretsmanager  = "http://localhost:4566"
+    iam             = "http://localhost:4566"
+    sts             = "http://localhost:4566"
+    kms             = "http://localhost:4566"
+    kinesis         = "http://localhost:4566"
+    lambda          = "http://localhost:4566"
+    cloudwatchlogs  = "http://localhost:4566"
+    eventbridge     = "http://localhost:4566"
+    sfn             = "http://localhost:4566"
+    cloudwatch      = "http://localhost:4566"
+    apigatewayv2    = "http://localhost:4566"
+    cognitoidp      = "http://localhost:4566"
+    ec2             = "http://localhost:4566"
+    ecs             = "http://localhost:4566"
+    ecr             = "http://localhost:4566"
+    elbv2           = "http://localhost:4566"
+    route53         = "http://localhost:4566"
+    ses             = "http://localhost:4566"
+    acm             = "http://localhost:4566"
+    rds             = "http://localhost:4566"
+    cloudformation  = "http://localhost:4566"
+    cloudfront      = "http://localhost:4566"
+    wafv2           = "http://localhost:4566"
+    athena          = "http://localhost:4566"
+    glue            = "http://localhost:4566"
+    firehose        = "http://localhost:4566"
+    appconfig       = "http://localhost:4566"
+    scheduler       = "http://localhost:4566"
+    appsync         = "http://localhost:4566"
+    efs             = "http://localhost:4566"
+    mediaconvert    = "http://localhost:4566"
+    bedrock         = "http://localhost:4566"
+    textract        = "http://localhost:4566"
+  }
+}
+```
+
+All Terraform resource lifecycle operations (create, read, update, delete) are supported for the 158 emulated services, including read-back attributes, tagging, and policy stubs that Terraform requires during plan/apply/refresh cycles.
 
 ## Supported Services (158)
 
@@ -136,101 +256,7 @@ const s3 = new S3Client({
 |---|---|
 | **EFS** | File systems, mount targets, access points, policies, tagging |
 
-## Terraform Support
-
-tinstack works as a drop-in replacement for LocalStack with Terraform. Configure the AWS provider to point all endpoints at `http://localhost:4566`:
-
-```hcl
-provider "aws" {
-  region                      = "us-east-1"
-  access_key                  = "test"
-  secret_key                  = "test"
-  skip_credentials_validation = true
-  skip_metadata_api_check     = true
-  skip_requesting_account_id  = true
-  s3_use_path_style           = true
-
-  endpoints {
-    s3              = "http://localhost:4566"
-    dynamodb        = "http://localhost:4566"
-    sqs             = "http://localhost:4566"
-    sns             = "http://localhost:4566"
-    ssm             = "http://localhost:4566"
-    secretsmanager  = "http://localhost:4566"
-    iam             = "http://localhost:4566"
-    sts             = "http://localhost:4566"
-    kms             = "http://localhost:4566"
-    kinesis         = "http://localhost:4566"
-    lambda          = "http://localhost:4566"
-    cloudwatchlogs  = "http://localhost:4566"
-    eventbridge     = "http://localhost:4566"
-    sfn             = "http://localhost:4566"
-    cloudwatch      = "http://localhost:4566"
-    apigatewayv2    = "http://localhost:4566"
-    cognitoidp      = "http://localhost:4566"
-    ec2             = "http://localhost:4566"
-    ecs             = "http://localhost:4566"
-    ecr             = "http://localhost:4566"
-    elbv2           = "http://localhost:4566"
-    route53         = "http://localhost:4566"
-    ses             = "http://localhost:4566"
-    acm             = "http://localhost:4566"
-    rds             = "http://localhost:4566"
-    cloudformation  = "http://localhost:4566"
-    cloudfront      = "http://localhost:4566"
-    wafv2           = "http://localhost:4566"
-    athena          = "http://localhost:4566"
-    glue            = "http://localhost:4566"
-    firehose        = "http://localhost:4566"
-    appconfig       = "http://localhost:4566"
-    scheduler       = "http://localhost:4566"
-    appsync         = "http://localhost:4566"
-    efs             = "http://localhost:4566"
-    mediaconvert    = "http://localhost:4566"
-    bedrock         = "http://localhost:4566"
-    textract        = "http://localhost:4566"
-  }
-}
-```
-
-All Terraform resource lifecycle operations (create, read, update, delete) are supported for the 158 emulated services, including read-back attributes, tagging, and policy stubs that Terraform requires during plan/apply/refresh cycles.
-
-## Configuration
-
-All configuration via environment variables:
-
-| Variable | Default | Description |
-|---|---|---|
-| `PORT` | `4566` | HTTP listen port |
-| `TINSTACK_DEFAULT_REGION` | `us-east-1` | Fallback region |
-| `TINSTACK_DEFAULT_ACCOUNT_ID` | `000000000000` | Fallback account ID |
-| `TINSTACK_STORAGE_MODE` | `memory` | `memory`, `sqlite`, `hybrid` |
-| `TINSTACK_STORAGE_PATH` | `./data` | Data directory for persistent modes |
-| `TINSTACK_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
-| `TINSTACK_ENABLED_SERVICES` | `*` | Comma-separated list, or `*` for all |
-
-## Performance
-
-- Startup: **~20ms** with all 158 services
-- API response: **<1ms** for in-memory operations
-- 2223+ integration tests run in **~5.5s**
-- Zero npm runtime dependencies — only Bun built-ins
-
-## Storage Backends
-
-- **memory** (default) — `Map`-based, fastest, data lost on restart
-- **sqlite** — `bun:sqlite` with WAL mode, persists to `tinstack.sqlite`
-- **hybrid** — In-memory reads with periodic SQLite write-behind, best of both
-
-## Lambda Invocation Modes
-
-Lambda supports three invocation modes, tried in order:
-
-1. **Docker** — Uses official AWS Lambda runtime images (`public.ecr.aws/lambda/nodejs:20`, etc.) for real execution. Requires Docker.
-2. **In-process** — Imports and runs JS/TS handlers directly in Bun. Fast, no Docker needed.
-3. **Mock** — Returns a stub response when no valid code ZIP is available.
-
-## Testing
+## Development
 
 2223+ tests across 167 files covering happy paths, error paths, edge cases, cross-service integration, and end-to-end multi-service architecture tests. All tests use real AWS SDK v3 clients pointed at the emulator.
 
@@ -244,7 +270,7 @@ bun run dev           # Start with hot reload
 TINSTACK_TEST_PORT=4567 bun test
 ```
 
-## Building a Standalone Binary
+### Building a Standalone Binary
 
 ```bash
 bun build --compile src/index.ts --outfile tinstack
@@ -258,24 +284,13 @@ bun build --compile --target=bun-windows-x64 src/index.ts --outfile tinstack-win
 
 The compiled binary includes Bun's runtime and all dependencies. No runtime installation needed.
 
-## Docker
+### Docker
 
 ```bash
 docker compose up
 # or
 docker build -t tinstack . && docker run -p 4566:4566 tinstack
 ```
-
-## Architecture
-
-Single `Bun.serve()` HTTP server routing by AWS protocol:
-
-- **JSON 1.0/1.1** — `X-Amz-Target` header dispatches to service handlers (DynamoDB, SQS, SSM, Secrets Manager, SNS, EventBridge, Kinesis, KMS, Cognito, CloudWatch Logs/Metrics, Step Functions, ACM, ECR, ECS, Firehose, WAFv2, Athena, Glue, Textract, Bedrock)
-- **Query/XML** — `Action` form param dispatches to handlers (STS, IAM, EC2, ELBv2, RDS, CloudFormation, SNS legacy, SQS legacy)
-- **REST** — URL path matching for Lambda, API Gateway, Route 53, SES, AppConfig, Scheduler, CloudFront, AppSync, MediaConvert, Bedrock, EFS
-- **S3** — Fallback handler supporting both path-style and virtual-host routing
-
-Each service follows a consistent pattern: **Service** (business logic + storage) → **Handler** (protocol translation).
 
 ## Contributing
 
@@ -291,4 +306,4 @@ mkdir src/services/myservice
 
 ## License
 
-MIT
+[MIT](LICENSE)
